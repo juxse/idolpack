@@ -1,0 +1,6 @@
+{
+  "name": "IDOL POCKET 3D — K-Pop Photocard TCG",
+  "description": "3D K-Pop Photocard Trading Card Game & World Tour Arena with tactile booster pack ripping, holographic selca cards, group synergies, and 90 stage battles.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
