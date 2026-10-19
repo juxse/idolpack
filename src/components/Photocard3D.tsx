@@ -5,6 +5,7 @@ import {
   IdolCard,
   RARITY_CODES,
   RARITY_LABELS,
+  RarityIndex,
   ROLES,
 } from '../game/data';
 import {
@@ -35,6 +36,9 @@ export interface Photocard3DProps {
   duplicateCoins?: number;
   onClick?: () => void;
   interactive3D?: boolean;
+  cleanArtMode?: boolean;
+  effectiveRarity?: RarityIndex;
+  rarityMask?: number;
 }
 
 export const RARITY_STYLES: Record<
@@ -93,6 +97,17 @@ export const RARITY_STYLES: Record<
     glowColor: 'rgba(255,79,163,0.95)',
     innerFrame: 'border-pink-200/80',
   },
+  5: {
+    outerBorder:
+      'border-[#67E8F9] shadow-[0_0_28px_rgba(56,189,248,0.7),0_0_45px_rgba(255,79,163,0.5)]',
+    badgeBg:
+      'bg-gradient-to-r from-[#38BDF8] via-[#FF4FA3] to-[#FBBF24] border border-white text-white shadow-[0_0_12px_rgba(255,255,255,0.8)]',
+    badgeText: 'text-white font-black tracking-wider',
+    foilGradient:
+      'conic-gradient(from 0deg at 50% 50%, rgba(56,189,248,0.5), rgba(168,85,247,0.5), rgba(255,79,163,0.5), rgba(251,191,36,0.5), rgba(52,211,153,0.5), rgba(56,189,248,0.5))',
+    glowColor: 'rgba(56,189,248,0.95)',
+    innerFrame: 'border-cyan-200/90',
+  },
 };
 
 function renderDecoOverlay(decoFrame?: DecoFrameId) {
@@ -134,12 +149,12 @@ function renderDecoOverlay(decoFrame?: DecoFrameId) {
         aria-hidden="true"
       >
         <path
-          d="M50 8 C42 2, 34 6, 38 12 C42 15, 47 11, 50 9 C53 11, 58 15, 62 12 C66 6, 58 2, 50 8 Z"
+          d="M84 88 C78 83, 72 86, 75 91 C78 93, 82 90, 84 89 C86 90, 90 93, 93 91 C96 86, 90 83, 84 88 Z"
           fill="#FF4FA3"
           stroke="#FFFFFF"
-          strokeWidth="1"
+          strokeWidth="0.9"
         />
-        <circle cx="50" cy="9" r="2.4" fill="#FDE047" />
+        <circle cx="84" cy="89" r="2" fill="#FDE047" />
         <rect
           x="4"
           y="4"
@@ -150,7 +165,7 @@ function renderDecoOverlay(decoFrame?: DecoFrameId) {
           stroke="#FF4FA3"
           strokeWidth="1.2"
           strokeDasharray="4 3"
-          opacity="0.75"
+          opacity="0.7"
         />
       </svg>
     );
@@ -164,7 +179,7 @@ function renderDecoOverlay(decoFrame?: DecoFrameId) {
         aria-hidden="true"
       >
         <path
-          d="M85 16 C83 13, 79 13, 79 17 C79 20, 85 24, 85 26 C85 24, 91 20, 91 17 C91 13, 87 13, 85 16 Z"
+          d="M85 84 C83 81, 79 81, 79 85 C79 88, 85 92, 85 94 C85 92, 91 88, 91 85 C91 81, 87 81, 85 84 Z"
           fill="#F43F5E"
           stroke="#FFE4E6"
           strokeWidth="0.8"
@@ -187,10 +202,10 @@ function renderDecoOverlay(decoFrame?: DecoFrameId) {
         aria-hidden="true"
       >
         <polygon
-          points="41,11 44,5 50,9 56,5 59,11"
+          points="77,91 79.5,85 84.5,88.5 89.5,85 92,91"
           fill="#FBBF24"
           stroke="#FEF08A"
-          strokeWidth="0.9"
+          strokeWidth="0.85"
         />
         <rect
           x="3.5"
@@ -200,8 +215,8 @@ function renderDecoOverlay(decoFrame?: DecoFrameId) {
           rx="10"
           fill="none"
           stroke="#FBBF24"
-          strokeWidth="1.4"
-          opacity="0.7"
+          strokeWidth="1.2"
+          opacity="0.65"
         />
       </svg>
     );
@@ -218,7 +233,8 @@ export const PhotocardBack3D: React.FC<{
   size?: 'xs' | 'sm' | 'md' | 'lg';
   onClick?: () => void;
   label?: string;
-}> = ({ rarity = 0, size = 'md', onClick, label = 'TAP UNTUK BUKA' }) => {
+  accentColor?: string;
+}> = ({ rarity = 0, size = 'md', onClick, label = 'TAP UNTUK BUKA', accentColor }) => {
   const rStyle = RARITY_STYLES[rarity] || RARITY_STYLES[0];
   const sizeClasses = {
     xs: 'w-[62px] h-[94px] sm:w-44 sm:h-64 shrink-0 rounded-[12px] sm:rounded-[18px]',
@@ -404,10 +420,11 @@ function renderGradeSlabPlaque(gradeTier?: CardGradeTier, isResponsiveXs?: boole
   );
 }
 
+
 /**
  * Dual-Tier Pokémon TCG Photocard Engine (Desktop-First Un-Truncated Edition):
  * - Common, Rare, Epic (0..2): Classic Pokémon TCG Elemental Framed Card with Beveled Portrait Window, Clean Idol Name + HP Header & Full Move Box
- * - Legendary, Mythic (3..4): Pokémon TCG Pocket Full-Art EX / Crown Card with 100% Full-Bleed Art, Stacked Group + Idol Name & Translucent EX Attack Box
+ * - Legendary, Mythic, Exotic (3..5): Pokémon TCG Pocket Full-Art EX / Crown / Rainbow Exotic Card with 100% Full-Bleed Art
  */
 export const Photocard3D: React.FC<Photocard3DProps> = ({
   card,
@@ -424,6 +441,9 @@ export const Photocard3D: React.FC<Photocard3DProps> = ({
   duplicateCoins = 0,
   onClick,
   interactive3D = true,
+  cleanArtMode = false,
+  effectiveRarity,
+  rarityMask,
 }) => {
   const fallbackSrc = getStylizedPortraitFallback(card);
   const [imgSrc, setImgSrc] = useState<string>(
@@ -459,14 +479,22 @@ export const Photocard3D: React.FC<Photocard3DProps> = ({
     };
   }, [card]);
 
-  const stats = getCardStats(card, level, awakeningStars, synergyBonus, gradeTier);
-  const rStyle = RARITY_STYLES[card.rarity] || RARITY_STYLES[0];
+  const activeRarity: RarityIndex = effectiveRarity !== undefined ? effectiveRarity : card.rarity;
+  const stats = getCardStats(card, level, awakeningStars, synergyBonus, gradeTier, activeRarity);
+  const rStyle = RARITY_STYLES[activeRarity] || RARITY_STYLES[0];
   const roleInfo = ROLES[card.role] || ROLES[0];
   const elemTheme = ROLE_ELEMENT_THEMES[card.role] || ROLE_ELEMENT_THEMES[0];
   const ability = ABILITIES[card.abilityId];
-  const isFullArtEx = card.rarity >= 3; // Legendary (3) and Mythic (4) are Full-Art EX / Crown cards!
+  const isFullArtEx = activeRarity >= 3 || cleanArtMode; // Clean Art Mode always renders 100% Full-Bleed HD Portrait!
   const collectorNo = `#${String(card.id + 1).padStart(3, '0')}/${ALL_CARDS.length}`;
-  const exBadgeLabel = card.rarity === 4 ? 'CROWN EX' : 'EX';
+  const exBadgeLabel =
+    activeRarity === 5
+      ? '🌈 EXOTIC EX'
+      : activeRarity === 4
+      ? 'CROWN EX'
+      : activeRarity === 3
+      ? 'GOLD EX'
+      : 'EX';
 
   // Enlarged Desktop 2:3 Photocard proportions so names & skills have generous horizontal room
   const sizeClasses = {
@@ -474,18 +502,19 @@ export const Photocard3D: React.FC<Photocard3DProps> = ({
     sm: 'w-36 h-52 sm:w-44 sm:h-64 shrink-0 rounded-[16px] sm:rounded-[18px]',
     md: 'w-36 h-52 sm:w-52 sm:h-[304px] shrink-0 rounded-[16px] sm:rounded-[20px]',
     lg: 'w-48 h-72 sm:w-64 sm:h-[372px] shrink-0 rounded-[20px] sm:rounded-[22px]',
-    xl: 'w-64 h-96 shrink-0 rounded-[24px]',
+    xl: 'w-72 h-[432px] sm:w-80 sm:h-[480px] shrink-0 rounded-[24px]',
   }[size];
 
   const isResponsiveXs = size === 'xs';
+  const isTilting = interactive3D && (tilt.rx !== 0 || tilt.ry !== 0);
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!interactive3D || !cardRef.current) return;
     const rect = cardRef.current.getBoundingClientRect();
     const x = (e.clientX - rect.left) / rect.width;
     const y = (e.clientY - rect.top) / rect.height;
-    const ry = (x - 0.5) * 20;
-    const rx = (0.5 - y) * 20;
+    const ry = (x - 0.5) * 16;
+    const rx = (0.5 - y) * 16;
     setTilt({ rx, ry, gx: Math.round(x * 100), gy: Math.round(y * 100) });
   };
 
@@ -501,9 +530,9 @@ export const Photocard3D: React.FC<Photocard3DProps> = ({
     const outerMetallicBorder =
       gradeTier === 10
         ? 'border-[#FBBF24] shadow-[0_0_24px_rgba(251,191,36,0.55)]'
-        : card.rarity === 2
+        : activeRarity === 2
         ? 'border-[#C084FC] shadow-[0_0_20px_rgba(168,85,247,0.5)]'
-        : card.rarity === 1
+        : activeRarity === 1
         ? 'border-[#38BDF8] shadow-[0_0_15px_rgba(56,189,248,0.4)]'
         : 'border-[#94A3B8]/80 shadow-[0_6px_16px_rgba(0,0,0,0.65)]';
 
@@ -516,36 +545,32 @@ export const Photocard3D: React.FC<Photocard3DProps> = ({
         data-card-tier="tcg-framed"
         style={{
           background: elemTheme.frameBg,
-          transform: interactive3D
+          transform: isTilting
             ? `perspective(900px) rotateX(${tilt.rx}deg) rotateY(${tilt.ry}deg)`
             : undefined,
-          transition:
-            tilt.rx === 0 && tilt.ry === 0
-              ? 'transform 0.35s cubic-bezier(0.22, 1, 0.36, 1)'
-              : 'none',
         }}
         className={`group relative select-none overflow-hidden border-[2.5px] sm:border-[3.5px] ${outerMetallicBorder} flex flex-col justify-between p-1 sm:p-2 transition-shadow ${sizeClasses} ${
           onClick ? 'cursor-pointer' : ''
-        } ${isSelected ? 'ring-2 ring-white scale-[1.03]' : ''}`}
+        } ${isSelected ? 'ring-2 ring-sky-400 shadow-[0_0_20px_rgba(56,189,248,0.45)]' : ''}`}
       >
         {/* Subtle Foil Sheen for Rare & Epic Framed Cards */}
-        {card.rarity >= 1 && (
+        {activeRarity >= 1 && (
           <div
             style={{
               background: rStyle.foilGradient,
               backgroundPosition: `${tilt.gx}% ${tilt.gy}%`,
             }}
-            className="pointer-events-none absolute inset-0 mix-blend-color-dodge opacity-25 group-hover:opacity-55 transition-opacity"
+            className="pointer-events-none absolute inset-0 mix-blend-color-dodge opacity-12 group-hover:opacity-45 transition-opacity"
           />
         )}
 
         {/* Custom Polco Deco Top-Loader Frame Overlay */}
         {renderDecoOverlay(decoFrame)}
 
-        {/* Optional PSA Grading Slab Plaque at very top */}
+        {/* Optional PSA Grading Slab Plaque */}
         {renderGradeSlabPlaque(gradeTier, isResponsiveXs)}
 
-        {/* 1. POKÉMON TCG HEADER: Clean Idol Name on Left (No Stage clutter!) + HP & Elemental Orb on Right */}
+        {/* 1. POKÉMON TCG HEADER: Clean Idol Name on Left + HP & Elemental Orb on Right */}
         <div className="relative z-10 flex items-center justify-between gap-1 px-0.5">
           <span
             className={`font-display font-black text-white leading-tight min-w-0 ${
@@ -597,7 +622,7 @@ export const Photocard3D: React.FC<Photocard3DProps> = ({
           )}
 
           {/* Holo Window Shimmer on Epic/Rare */}
-          {card.rarity >= 1 && (
+          {activeRarity >= 1 && (
             <div
               style={{
                 background:
@@ -607,15 +632,10 @@ export const Photocard3D: React.FC<Photocard3DProps> = ({
             />
           )}
 
-          {/* Top-Left Rarity + Level Tag inside Portrait Window */}
-          <div className="absolute top-0.5 left-0.5 sm:top-1 sm:left-1 flex items-center gap-0.5">
-            <span
-              className={`px-1 py-0.2 rounded text-[7px] sm:text-[8px] font-mono font-black shadow ${rStyle.badgeBg} ${rStyle.badgeText}`}
-            >
-              {RARITY_CODES[card.rarity]}
-            </span>
-            <span className="px-1 py-0.2 rounded bg-black/70 text-[7px] sm:text-[8px] font-mono font-bold text-white tabular-nums">
-              L{level}
+          {/* Top-Left Level Tag inside Portrait Window */}
+          <div className="absolute top-0.5 left-0.5 sm:top-1 sm:left-1 flex items-center">
+            <span className="px-1.5 py-0.5 rounded bg-black/75 backdrop-blur-sm text-[7px] sm:text-[8.5px] font-mono font-bold text-white border border-white/20 shadow tabular-nums">
+              Lv.{level}
             </span>
           </div>
 
@@ -696,7 +716,7 @@ export const Photocard3D: React.FC<Photocard3DProps> = ({
             </span>
           </div>
 
-          {/* Bottom Collector Metadata Line (Desktop / Larger Cards) */}
+          {/* Bottom Collector Metadata Line */}
           <div
             className={`${
               isResponsiveXs ? 'hidden sm:flex' : 'flex'
@@ -705,7 +725,12 @@ export const Photocard3D: React.FC<Photocard3DProps> = ({
             <span>
               {card.era} · {elemTheme.typeName}
             </span>
-            <span>{collectorNo}</span>
+            <div className="flex items-center gap-1.5">
+              <span className={`font-bold ${rStyle.badgeText}`}>
+                {activeRarity === 2 ? '◆◆ EPIC' : activeRarity === 1 ? '◆ RARE' : '● COMMON'}
+              </span>
+              <span>{collectorNo}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -728,17 +753,13 @@ export const Photocard3D: React.FC<Photocard3DProps> = ({
       onPointerLeave={handlePointerLeave}
       data-card-tier="tcg-fullart-ex"
       style={{
-        transform: interactive3D
+        transform: isTilting
           ? `perspective(900px) rotateX(${tilt.rx}deg) rotateY(${tilt.ry}deg)`
           : undefined,
-        transition:
-          tilt.rx === 0 && tilt.ry === 0
-            ? 'transform 0.35s cubic-bezier(0.22, 1, 0.36, 1)'
-            : 'none',
       }}
       className={`group relative select-none overflow-hidden border-[2.5px] sm:border-[3px] ${exOuterBorder} bg-[#0B0E18] flex flex-col justify-between transition-shadow ${sizeClasses} ${
         onClick ? 'cursor-pointer' : ''
-      } ${isSelected ? 'ring-2 ring-white scale-[1.03]' : ''}`}
+      } ${isSelected ? 'ring-2 ring-sky-400 shadow-[0_0_20px_rgba(56,189,248,0.45)]' : ''}`}
     >
       {/* 100% Full-Bleed Idol Selca Portrait (Pokémon TCG EX / Crown Full-Art) */}
       <img
@@ -754,37 +775,39 @@ export const Photocard3D: React.FC<Photocard3DProps> = ({
           onError={() => {
             setImgSrc(fallbackSrc);
           }}
-          className="pointer-events-none absolute inset-0 w-full h-full object-cover object-top transition-transform duration-500 group-hover:scale-[1.06]"
+          className="pointer-events-none absolute inset-0 w-full h-full object-cover object-top"
         />
       )}
 
-      {/* Prismatic Diagonal EX Holographic Foil Layer */}
+      {/* Subtle Prismatic Diagonal EX Holographic Foil Layer (Crisp idle so faces are never hazy/blurry) */}
       <div
         style={{
           background: rStyle.foilGradient,
           backgroundPosition: `${tilt.gx}% ${tilt.gy}%`,
         }}
-        className="pointer-events-none absolute inset-0 mix-blend-color-dodge opacity-42 group-hover:opacity-75 transition-opacity"
+        className="pointer-events-none absolute inset-0 mix-blend-color-dodge opacity-14 group-hover:opacity-50 transition-opacity"
       />
 
       {/* Interactive 3D Specular Light Glare */}
       {interactive3D && (
         <div
           style={{
-            background: `radial-gradient(circle at ${tilt.gx}% ${tilt.gy}%, rgba(255,255,255,0.36) 0%, transparent 55%)`,
+            background: `radial-gradient(circle at ${tilt.gx}% ${tilt.gy}%, rgba(255,255,255,0.32) 0%, transparent 55%)`,
           }}
           className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity"
         />
       )}
 
-      {/* Top & Bottom Full-Art EX Vignette */}
-      <div
-        style={{
-          background:
-            'linear-gradient(180deg, rgba(6,8,16,0.72) 0%, rgba(6,8,16,0.0) 28%, rgba(6,8,16,0.12) 52%, rgba(6,8,16,0.90) 78%, rgba(6,8,16,0.98) 100%)',
-        }}
-        className="pointer-events-none absolute inset-0"
-      />
+      {/* Top & Bottom Full-Art EX Vignette (Hidden in Clean Art Mode so 100% of the photo shines) */}
+      {!cleanArtMode && (
+        <div
+          style={{
+            background:
+              'linear-gradient(180deg, rgba(6,8,16,0.68) 0%, rgba(6,8,16,0.0) 24%, rgba(6,8,16,0.05) 55%, rgba(6,8,16,0.88) 80%, rgba(6,8,16,0.96) 100%)',
+          }}
+          className="pointer-events-none absolute inset-0"
+        />
+      )}
 
       {/* Inner Double-Bezel Metallic EX Frame */}
       <div
@@ -794,125 +817,140 @@ export const Photocard3D: React.FC<Photocard3DProps> = ({
       {/* Custom Polco Deco Top-Loader Frame Overlay */}
       {renderDecoOverlay(decoFrame)}
 
-      {/* TOP POKÉMON EX HEADER + OPTIONAL PSA GRADING SLAB PLAQUE (SINGLE CLEAN ROW SO PORTRAIT IS UNOBSTRUCTED) */}
-      <div className="relative z-10 px-1 pt-1 sm:px-2.5 sm:pt-2 flex flex-col gap-0.5">
-        {renderGradeSlabPlaque(gradeTier, isResponsiveXs)}
+      {/* TOP POKÉMON EX HEADER + OPTIONAL PSA GRADING SLAB PLAQUE */}
+      {!cleanArtMode && (
+        <div className="relative z-10 px-1 pt-1 sm:px-2.5 sm:pt-2 flex flex-col gap-0.5">
+          {renderGradeSlabPlaque(gradeTier, isResponsiveXs)}
 
-        <div className="flex items-center justify-between gap-1">
-          <div className="flex items-center gap-0.5 sm:gap-1 min-w-0">
-            <span
-              className={`px-1 sm:px-1.5 py-0.2 rounded text-[7px] sm:text-[9px] font-mono font-black tracking-tight shadow shrink-0 ${rStyle.badgeBg} ${rStyle.badgeText}`}
+          <div className="flex items-center justify-between gap-1">
+            <div className="flex items-center gap-0.5 sm:gap-1 min-w-0">
+              <span
+                className={`px-1 sm:px-1.5 py-0.2 rounded text-[7px] sm:text-[9px] font-mono font-black tracking-tight shadow shrink-0 ${rStyle.badgeBg} ${rStyle.badgeText}`}
+              >
+                {exBadgeLabel}
+              </span>
+              <span className="px-1.5 py-0.5 rounded bg-[#070B16]/90 text-[7px] sm:text-[9px] font-mono font-bold text-white border border-white/15 tabular-nums shrink-0">
+                Lv.{level}
+              </span>
+              {isBias && (
+                <span className="px-1 py-0.2 rounded bg-rose-500 text-white text-[6px] sm:text-[8px] font-mono font-black shadow shrink-0">
+                  BIAS
+                </span>
+              )}
+              {isNew && (
+                <span className="px-1 py-0.2 rounded bg-amber-400 text-black text-[6px] sm:text-[8px] font-mono font-black shadow shrink-0">
+                  NEW
+                </span>
+              )}
+              {duplicateCoins > 0 && (
+                <span className="px-1 py-0.2 rounded bg-sky-400 text-black text-[6px] sm:text-[8px] font-mono font-black shadow tabular-nums shrink-0">
+                  +{duplicateCoins}
+                </span>
+              )}
+            </div>
+
+            <div
+              title={`Stamina HP: ${stats.hp} · Elemen: ${elemTheme.typeName} (${roleInfo.name})`}
+              className="flex items-center gap-1 bg-[#070B16]/90 px-1.5 py-0.5 rounded-full border border-white/20 shrink-0"
             >
-              {exBadgeLabel}
-            </span>
-            <span className="px-1 py-0.2 rounded bg-black/70 backdrop-blur-md text-[7px] sm:text-[9px] font-mono font-bold text-white border border-white/15 tabular-nums shrink-0">
-              L{level}
-            </span>
-            {isBias && (
-              <span className="px-1 py-0.2 rounded bg-rose-500/95 text-white text-[6px] sm:text-[8px] font-mono font-black shadow shrink-0">
-                BIAS
+              <span className="text-[7px] sm:text-[10px] font-mono font-black text-amber-300 tabular-nums">
+                <span className={`${isResponsiveXs ? 'hidden sm:inline' : 'inline'} text-[7px] text-white/80 mr-0.5`}>
+                  HP
+                </span>
+                {stats.hp}
               </span>
-            )}
-            {isNew && (
-              <span className="px-1 py-0.2 rounded bg-amber-400 text-black text-[6px] sm:text-[8px] font-mono font-black shadow shrink-0">
-                NEW
-              </span>
-            )}
-            {duplicateCoins > 0 && (
-              <span className="px-1 py-0.2 rounded bg-sky-400 text-black text-[6px] sm:text-[8px] font-mono font-black shadow tabular-nums shrink-0">
-                +{duplicateCoins}
-              </span>
-            )}
-          </div>
-
-          <div
-            title={`Stamina HP: ${stats.hp} · Elemen: ${elemTheme.typeName} (${roleInfo.name})`}
-            className="flex items-center gap-1 bg-black/70 backdrop-blur-md px-1.5 py-0.5 rounded-full border border-white/20 shrink-0"
-          >
-            <span className="text-[7px] sm:text-[10px] font-mono font-black text-amber-300 tabular-nums">
-              <span className={`${isResponsiveXs ? 'hidden sm:inline' : 'inline'} text-[7px] text-white/80 mr-0.5`}>
-                HP
-              </span>
-              {stats.hp}
-            </span>
-            {renderElementOrb(card.role, isResponsiveXs ? 'xs' : 'sm')}
+              {renderElementOrb(card.role, isResponsiveXs ? 'xs' : 'sm')}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Center Full-Art Showcase Spacer */}
       <div className="flex-1" />
 
-      {/* BOTTOM POKÉMON EX TRANSLUCENT MOVE BOX (SEPARATE GROUP & NAME ROWS SO NAMES NEVER TRUNCATE) */}
-      <div className="relative z-10 px-1.5 pb-1.5 pt-2 sm:px-2.5 sm:pb-2 sm:pt-3 flex flex-col gap-0.5">
-        {/* Row 1: Dedicated Group Name + Awakening Stars + Era Strip */}
-        <div
-          className={`${
-            isResponsiveXs ? 'hidden sm:flex' : 'flex'
-          } items-center justify-between text-[8px] sm:text-[9.5px] font-mono font-bold text-amber-200/95 leading-none`}
-        >
-          <span className="truncate">{card.group}</span>
-          <div className="flex items-center gap-1 shrink-0">
-            <div className="flex items-center gap-0.5">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <svg
-                  key={i}
-                  viewBox="0 0 20 20"
-                  aria-hidden="true"
-                  className={`w-2 h-2 ${
-                    i < awakeningStars ? 'text-amber-300 fill-current' : 'text-white/25 fill-current'
-                  }`}
-                >
-                  <path d="M10 1.5l2.47 5.01 5.53.8-4 3.9.94 5.51L10 14.12l-4.94 2.6.94-5.51-4-3.9 5.53-.8L10 1.5z" />
-                </svg>
-              ))}
+      {/* BOTTOM POKÉMON EX TRANSLUCENT MOVE BOX */}
+      {!cleanArtMode ? (
+        <div className="relative z-10 px-1.5 pb-1.5 pt-2 sm:px-2.5 sm:pb-2 sm:pt-3 flex flex-col gap-0.5">
+          {/* Row 1: Dedicated Group Name + Awakening Stars + Era Strip */}
+          <div
+            className={`${
+              isResponsiveXs ? 'hidden sm:flex' : 'flex'
+            } items-center justify-between text-[8px] sm:text-[9.5px] font-mono font-bold text-amber-200/95 leading-none`}
+          >
+            <span className="truncate">{card.group}</span>
+            <div className="flex items-center gap-1 shrink-0">
+              <div className="flex items-center gap-0.5">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <svg
+                    key={i}
+                    viewBox="0 0 20 20"
+                    aria-hidden="true"
+                    className={`w-2 h-2 ${
+                      i < awakeningStars ? 'text-amber-300 fill-current' : 'text-white/25 fill-current'
+                    }`}
+                  >
+                    <path d="M10 1.5l2.47 5.01 5.53.8-4 3.9.94 5.51L10 14.12l-4.94 2.6.94-5.51-4-3.9 5.53-.8L10 1.5z" />
+                  </svg>
+                ))}
+              </div>
+              <span className="text-[7.5px] text-white/75">{card.era}</span>
             </div>
-            <span className="text-[7.5px] text-white/75">{card.era}</span>
           </div>
-        </div>
 
-        {/* Row 2: Full-Width Idol Name + ex Badge (Never collides with Group Name!) */}
-        <div
-          className={`font-display font-black text-white leading-tight drop-shadow-[0_2px_6px_rgba(0,0,0,0.95)] ${
-            isResponsiveXs
-              ? 'text-[9px] sm:text-[15px] truncate sm:whitespace-normal'
-              : size === 'xl'
-              ? 'text-xl'
-              : 'text-sm sm:text-base'
-          }`}
-        >
-          <span>{card.name}</span>{' '}
-          <span className="text-[8px] sm:text-[10px] font-mono font-black text-amber-300 italic">
-            ex
-          </span>
-        </div>
-
-        {/* Row 3: Translucent EX Attack Strip (Single Energy Orb + Full Skill Name + ATK) */}
-        <div className="mt-0.5 px-1 py-0.5 sm:px-1.5 sm:py-1 rounded sm:rounded-lg bg-black/80 backdrop-blur-md border border-amber-300/35 flex items-center justify-between gap-1 text-[8px] sm:text-[9.5px]">
-          <div className="flex items-center gap-1 min-w-0">
-            {renderElementOrb(card.role, 'xs')}
-            <span
-              className={`font-display font-bold text-white/95 leading-tight ${
-                isResponsiveXs
-                  ? 'truncate'
-                  : 'whitespace-nowrap'
-              }`}
-            >
-              {ability ? ability.name : roleInfo.name}
+          {/* Row 2: Full-Width Idol Name + ex Badge */}
+          <div
+            className={`font-display font-black text-white leading-tight drop-shadow-[0_2px_6px_rgba(0,0,0,0.95)] ${
+              isResponsiveXs
+                ? 'text-[9px] sm:text-[15px] truncate sm:whitespace-normal'
+                : size === 'xl'
+                ? 'text-xl'
+                : 'text-sm sm:text-base'
+            }`}
+          >
+            <span>{card.name}</span>{' '}
+            <span className="text-[8px] sm:text-[10px] font-mono font-black text-amber-300 italic">
+              ex
             </span>
           </div>
-          <span className="text-amber-300 font-mono font-black tabular-nums shrink-0">{stats.atk}</span>
-        </div>
 
-        <div
-          className={`${
-            isResponsiveXs ? 'hidden sm:flex' : 'flex'
-          } items-center justify-between text-[7px] font-mono text-white/70 px-0.5 tabular-nums`}
-        >
-          <span>EX RULE · FULL-ART HOLO</span>
+          {/* Row 3: Crisp EX Attack Strip */}
+          <div className="mt-0.5 px-1 py-0.5 sm:px-1.5 sm:py-1 rounded sm:rounded-lg bg-[#070B16]/90 border border-amber-300/35 flex items-center justify-between gap-1 text-[8px] sm:text-[9.5px]">
+            <div className="flex items-center gap-1 min-w-0">
+              {renderElementOrb(card.role, 'xs')}
+              <span
+                className={`font-display font-bold text-white/95 leading-tight ${
+                  isResponsiveXs ? 'truncate' : 'whitespace-nowrap'
+                }`}
+              >
+                {ability ? ability.name : roleInfo.name}
+              </span>
+            </div>
+            <span className="text-amber-300 font-mono font-black tabular-nums shrink-0">{stats.atk}</span>
+          </div>
+
+          <div
+            className={`${
+              isResponsiveXs ? 'hidden sm:flex' : 'flex'
+            } items-center justify-between text-[7px] font-mono text-white/70 px-0.5 tabular-nums`}
+          >
+            <span>EX RULE · FULL-ART HOLO</span>
+            <div className="flex items-center gap-1.5">
+              <span className={`font-bold ${rStyle.badgeText}`}>
+                {activeRarity === 5 ? '🌈 EXOTIC' : activeRarity === 4 ? '★ MYTHIC' : '★ LEGEND'}
+              </span>
+              <span>{collectorNo}</span>
+            </div>
+          </div>
+        </div>
+      ) : (
+        /* Minimal watermark corner in Clean Art Mode */
+        <div className="relative z-10 px-3 py-2 flex items-center justify-between text-[10px] font-mono text-white/80 bg-gradient-to-t from-black/60 to-transparent">
+          <span className="font-display font-bold text-white drop-shadow">
+            {card.name} · {card.group}
+          </span>
           <span>{collectorNo}</span>
         </div>
-      </div>
+      )}
     </div>
   );
 };

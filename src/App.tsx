@@ -36,6 +36,7 @@ import {
   executeBannerPull,
   executeCardGrading,
   executeWonderPick,
+  generateStarterMythicDraft,
   generateWonderPickBoards,
   getAwakenDuplicateRequirement,
   getCardGradeInfo,
@@ -45,6 +46,7 @@ import {
   PullOutcomeItem,
   refreshWonderPickBoardsPaid,
   SaveState,
+  selectStarterMythicCard,
   WonderPickBoard,
 } from './game/rules';
 import {
@@ -52,6 +54,7 @@ import {
   syncServerImageCache,
 } from './utils/imageResolver';
 import { sound } from './utils/sound';
+import { AuroraWaveBackground } from './components/AuroraWaveBackground';
 import { BattleArenaModal, BattleResultPayload } from './components/BattleArenaModal';
 import { BinderDeckView } from './components/BinderDeckView';
 import { CardInspectorModal } from './components/CardInspectorModal';
@@ -59,7 +62,7 @@ import { GroupDexModal } from './components/GroupDexModal';
 import { HomeView } from './components/HomeView';
 import { PackRipView } from './components/PackRipView';
 import { QuestsModal } from './components/QuestsModal';
-import { ThreeStage, StageSceneMode, BattleCameraPhase } from './components/ThreeStage';
+import { StarterMythicDraftModal } from './components/StarterMythicDraftModal';
 import { TitleScreen } from './components/TitleScreen';
 import { WonderPickView } from './components/WonderPickView';
 import { WorldTourView } from './components/WorldTourView';
@@ -92,6 +95,31 @@ function loadSaveState(): SaveState {
         agencyScheduleClaimed: { ...(parsed.agencyScheduleClaimed || {}) },
         agencyScheduleAssigned: { ...(parsed.agencyScheduleAssigned || {}) },
       };
+
+      const hasOwnedCards = Object.keys(merged.inv).some((k) => (merged.inv[Number(k)] || 0) > 0);
+      merged.starterDraftCompleted =
+        typeof parsed.starterDraftCompleted === 'boolean'
+          ? parsed.starterDraftCompleted
+          : hasOwnedCards;
+
+      if (!merged.cardRarity) merged.cardRarity = {};
+      if (!merged.cardRarityMask) merged.cardRarityMask = {};
+
+      // Ensure Woni, Wonyoung, and Yujin have proper Rare (1) rarity as requested
+      ALL_CARDS.forEach((c) => {
+        if (
+          (c.name === 'Woni' && c.group === 'RESCENE') ||
+          (c.name === 'Wonyoung' && c.group === 'IVE') ||
+          (c.name === 'Yujin' && (c.group === 'IVE' || c.group === 'Kep1er'))
+        ) {
+          if (merged.cardRarity && merged.cardRarity[c.id] !== undefined && merged.cardRarity[c.id] > 1) {
+            merged.cardRarity[c.id] = 1;
+            if (merged.cardRarityMask) {
+              merged.cardRarityMask[c.id] = 1 << 1;
+            }
+          }
+        }
+      });
 
       // Check daily reset
       const today = new Date().toDateString();
@@ -137,13 +165,40 @@ export default function App() {
   const [hudCollapsed, setHudCollapsed] = useState<boolean>(false);
   const [muted, setMuted] = useState<boolean>(false);
   const [cameraTrauma, setCameraTrauma] = useState<number>(0);
-  const [battleCameraPhase, setBattleCameraPhase] = useState<BattleCameraPhase>('idle');
+  const [, setBattleCameraPhase] = useState<string>('idle');
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [confirmResetOpen, setConfirmResetOpen] = useState<boolean>(false);
+  const [starterDraftPool, setStarterDraftPool] = useState<IdolCard[]>(() =>
+    generateStarterMythicDraft(Date.now())
+  );
 
   const showToast = useCallback((msg: string) => {
     setToastMsg(msg);
   }, []);
+
+  const handleConfirmStarterMythic = useCallback(
+    (chosenCard: IdolCard) => {
+      const nextState: SaveState = {
+        ...saveState,
+        inv: {},
+        lv: {},
+        stars: {},
+        deck: [],
+        biasBondXp: {},
+        cardDeco: {},
+      };
+      const res = selectStarterMythicCard(nextState, chosenCard.id);
+      if (!res.ok) {
+        showToast(res.reason || 'Gagal memilih kartu starter.');
+        return;
+      }
+      setSaveState(nextState);
+      showToast(
+        `👑 Selamat datang Produser! ${chosenCard.name} (${chosenCard.group}) resmi menjadi Center Bias pertamamu + 1 Tiket Pack Gratis siap dibuka!`
+      );
+    },
+    [saveState, showToast]
+  );
 
   useEffect(() => {
     if (!toastMsg) return;
@@ -505,19 +560,23 @@ export default function App() {
       ownedIds.sort((a, b) => {
         const cA = ALL_CARDS[a];
         const cB = ALL_CARDS[b];
+        const effA = prev.cardRarity?.[a] ?? cA.rarity;
+        const effB = prev.cardRarity?.[b] ?? cB.rarity;
         const pA = getCardStats(
           cA,
           prev.lv[a] || 1,
           prev.stars[a] || 0,
           0,
-          prev.cardGrades?.[a] || 0
+          prev.cardGrades?.[a] || 0,
+          effA
         ).power;
         const pB = getCardStats(
           cB,
           prev.lv[b] || 1,
           prev.stars[b] || 0,
           0,
-          prev.cardGrades?.[b] || 0
+          prev.cardGrades?.[b] || 0,
+          effB
         ).power;
         return pB - pA;
       });
@@ -773,17 +832,6 @@ export default function App() {
     return calculateUnitSynergy(deckCards, saveState.biasCardId, saveState.biasBondXp);
   }, [saveState.deck, saveState.biasCardId, saveState.biasBondXp]);
 
-  const threeMode: StageSceneMode =
-    shellState === 'title'
-      ? 'title'
-      : activeBattleStage !== null
-      ? 'battle'
-      : activeTab === 'pack'
-      ? 'pack'
-      : activeTab === 'home' || activeTab === 'binder' || activeTab === 'wonder'
-      ? 'binder'
-      : 'tour';
-
   const producerLevel = Math.floor(saveState.xp / 200) + 1;
   const centerBiasCard =
     (saveState.biasCardId != null ? ALL_CARDS[saveState.biasCardId] : null) ||
@@ -791,18 +839,17 @@ export default function App() {
     ALL_CARDS[0];
 
   return (
-    <div className="relative w-screen h-[100dvh] overflow-hidden bg-[#141518] select-none">
-      {/* Persistent Full-Viewport Three.js 3D Stage */}
-      <ThreeStage
-        mode={threeMode}
-        bannerTitle={activeBanner.title}
-        bannerColor={activeBanner.primaryColor}
-        secondaryColor={activeBanner.secondaryColor}
-        packRipState={packRipState}
-        cameraTrauma={cameraTrauma}
-        battleCameraPhase={battleCameraPhase}
-        onPackClicked={() => handleTriggerPull(5)}
-      />
+    <div className="relative w-screen h-[100dvh] overflow-hidden bg-[#060913] select-none">
+      {/* Aesthetic Aurora Wave Gradient Background (Pokémon TCG Pocket Clean Look, Zero WebGL Lag) */}
+      <AuroraWaveBackground activeTab={activeTab} />
+
+      {/* 0. PRODUCER DEBUT DRAFT (1 OF 5 RANDOM MYTHIC CARDS ON NEW GAME / RESET DATA) */}
+      {shellState !== 'title' && !saveState.starterDraftCompleted && (
+        <StarterMythicDraftModal
+          draftCards={starterDraftPool}
+          onConfirmSelect={handleConfirmStarterMythic}
+        />
+      )}
 
       {/* 1. TITLE SCREEN STATE */}
       {shellState === 'title' && (
@@ -813,7 +860,7 @@ export default function App() {
       )}
 
       {/* 2. PLAYING HUD & GAME SHELL */}
-      {shellState !== 'title' && (
+      {shellState !== 'title' && saveState.starterDraftCompleted && (
         <>
           {/* Compact Liquid Glass Top App Bar */}
           {!hudCollapsed && activeBattleStage === null && (
@@ -1246,7 +1293,11 @@ export default function App() {
           gradeAttempts={saveState.cardGradeAttempts?.[inspectedCard.id] || 0}
           coins={saveState.coins}
           diamonds={saveState.diamonds ?? 0}
-          synergyBonus={activeUnitSynergy.totalBonus}
+          synergyBonus={
+            saveState.deck.includes(inspectedCard.id) ? activeUnitSynergy.totalBonus : 0
+          }
+          effectiveRarity={saveState.cardRarity?.[inspectedCard.id] ?? inspectedCard.rarity}
+          rarityMask={saveState.cardRarityMask?.[inspectedCard.id]}
           onUpgrade={handleUpgradeCard}
           onAwaken={handleAwakenCard}
           onGradeCard={handleGradeCard}
@@ -1327,11 +1378,14 @@ export default function App() {
             <div className="mt-5 flex items-center justify-center gap-3">
               <button
                 type="button"
+                data-testid="confirm-reset-data-btn"
                 onClick={() => {
                   const fresh = createInitialSaveState();
+                  setStarterDraftPool(generateStarterMythicDraft(Date.now()));
                   setSaveState(fresh);
                   setConfirmResetOpen(false);
-                  showToast('Progres berhasil direset ke awal.');
+                  setActiveTab('home');
+                  showToast('Data direset! Silakan pilih 1 dari 5 Kartu Mythic baru untuk debut.');
                 }}
                 className="min-h-[44px] px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs cursor-pointer"
               >

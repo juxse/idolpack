@@ -15,6 +15,17 @@ function isValidCachedUrl(url: unknown): url is string {
   return typeof url === 'string' && url.startsWith('/api/idol-proxy?u=');
 }
 
+/**
+ * Upgrades any cached 333px/500px Wikia thumbnail URL to crisp 800px HD width
+ * so cards in Formation, Binder, and Full-Screen Clean Art Preview look razor-sharp.
+ */
+function upgradeToHdProxiedUrl(url: string): string {
+  if (!url) return '';
+  return url
+    .replace(/scale-to-width-down%2F(333|500)/gi, 'scale-to-width-down%2F800')
+    .replace(/scale-to-width-down\/(333|500)/gi, 'scale-to-width-down/800');
+}
+
 try {
   // Purge old legacy localStorage keys so outdated/wrong member photos are never reused
   ['idol_pocket_selca_v3', 'idol_pocket_selca_v4', 'idol_pocket_selca_v5'].forEach((k) => {
@@ -31,7 +42,7 @@ try {
     const clean: Record<string, string> = {};
     for (const [k, v] of Object.entries(parsed)) {
       if (isValidCachedUrl(v)) {
-        clean[k] = v;
+        clean[k] = upgradeToHdProxiedUrl(v);
       }
     }
     memoryCache = clean;
@@ -41,17 +52,28 @@ try {
   memoryCache = {};
 }
 
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
 function persistCache() {
-  try {
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(memoryCache));
-  } catch {
-    // ignore quota errors
-  }
+  if (persistTimer) return;
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    try {
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(memoryCache));
+    } catch {
+      // ignore quota errors
+    }
+  }, 300);
 }
 
+let notifyScheduled = false;
 function notifyListeners() {
   imageStats.loaded = Object.keys(memoryCache).length;
-  listeners.forEach((fn) => fn());
+  if (notifyScheduled) return;
+  notifyScheduled = true;
+  requestAnimationFrame(() => {
+    notifyScheduled = false;
+    listeners.forEach((fn) => fn());
+  });
 }
 
 export function subscribeImageUpdates(cb: () => void): () => void {
@@ -115,10 +137,11 @@ export async function resolveIdolImage(card: IdolCard): Promise<string> {
       if (res.ok) {
         const data = (await res.json()) as { url?: string };
         if (isValidCachedUrl(data.url)) {
-          memoryCache[card.key] = data.url;
+          const hdUrl = upgradeToHdProxiedUrl(data.url);
+          memoryCache[card.key] = hdUrl;
           persistCache();
           notifyListeners();
-          return data.url;
+          return hdUrl;
         }
       }
     } catch {
@@ -151,7 +174,7 @@ export async function prefetchIdolBatch(cards: IdolCard[]) {
       if (data.results) {
         for (const [k, v] of Object.entries(data.results)) {
           if (isValidCachedUrl(v)) {
-            memoryCache[k] = v;
+            memoryCache[k] = upgradeToHdProxiedUrl(v);
           }
         }
         persistCache();
@@ -171,7 +194,7 @@ export async function syncServerImageCache() {
       if (data.cache && Object.keys(data.cache).length > 0) {
         for (const [k, v] of Object.entries(data.cache)) {
           if (isValidCachedUrl(v)) {
-            memoryCache[k] = v;
+            memoryCache[k] = upgradeToHdProxiedUrl(v);
           }
         }
         persistCache();

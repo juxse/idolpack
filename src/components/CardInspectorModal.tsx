@@ -1,17 +1,19 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Award,
   Check,
+  Eye,
   Flame,
   Gem,
   Heart,
+  Maximize2,
   Shield,
   Sparkles,
   Swords,
   X,
   Zap,
 } from 'lucide-react';
-import { ABILITIES, ALL_CARDS, IdolCard, RARITY_LABELS, ROLES } from '../game/data';
+import { ABILITIES, ALL_CARDS, IdolCard, RARITY_LABELS, RarityIndex, ROLES } from '../game/data';
 import {
   CardGradeTier,
   DECO_FRAMES,
@@ -41,6 +43,8 @@ interface CardInspectorModalProps {
   coins: number;
   diamonds?: number;
   synergyBonus: number;
+  effectiveRarity?: RarityIndex;
+  rarityMask?: number;
   onUpgrade: (cardId: number) => void;
   onAwaken: (cardId: number) => void;
   onGradeCard?: (cardId: number) => void;
@@ -81,6 +85,12 @@ const RARITY_ACCENT_COLORS: Record<number, { text: string; bg: string; border: s
     border: 'border-[#FF4FA3]/50',
     glow: 'radial-gradient(circle, rgba(255,79,163,0.4) 0%, transparent 70%)',
   },
+  5: {
+    text: 'text-cyan-300 font-black',
+    bg: 'bg-gradient-to-r from-cyan-500/20 via-pink-500/20 to-amber-500/20',
+    border: 'border-cyan-400/60',
+    glow: 'radial-gradient(circle, rgba(56,189,248,0.45) 0%, rgba(255,79,163,0.3) 50%, transparent 80%)',
+  },
 };
 
 export const CardInspectorModal: React.FC<CardInspectorModalProps> = ({
@@ -97,6 +107,8 @@ export const CardInspectorModal: React.FC<CardInspectorModalProps> = ({
   coins,
   diamonds = 0,
   synergyBonus,
+  effectiveRarity,
+  rarityMask,
   onUpgrade,
   onAwaken,
   onGradeCard,
@@ -105,13 +117,17 @@ export const CardInspectorModal: React.FC<CardInspectorModalProps> = ({
   onSetDecoFrame,
   onClose,
 }) => {
-  const currentStats = getCardStats(card, level, awakeningStars, synergyBonus, gradeTier);
+  const [cleanArtFullscreen, setCleanArtFullscreen] = useState(false);
+
+  const activeRarity = effectiveRarity !== undefined ? effectiveRarity : card.rarity;
+  const currentStats = getCardStats(card, level, awakeningStars, synergyBonus, gradeTier, activeRarity);
   const nextStats = getCardStats(
     card,
     Math.min(15, level + 1),
     awakeningStars,
     synergyBonus,
-    gradeTier
+    gradeTier,
+    activeRarity
   );
   const upCost = getUpgradeCost(card, level);
   const canUpgrade = level < 15 && coins >= upCost;
@@ -141,7 +157,7 @@ export const CardInspectorModal: React.FC<CardInspectorModalProps> = ({
   const roleInfo = ROLES[card.role] || ROLES[0];
   const ability = ABILITIES[card.abilityId];
   const bondInfo = getBiasBondInfo(bondXp);
-  const rarityTheme = RARITY_ACCENT_COLORS[card.rarity] || RARITY_ACCENT_COLORS[0];
+  const rarityTheme = RARITY_ACCENT_COLORS[activeRarity] || RARITY_ACCENT_COLORS[0];
   const pityProgressPct = Math.min(
     100,
     Math.round((Math.min(GRADING_BLACK_LABEL_PITY, gradeAttempts) / GRADING_BLACK_LABEL_PITY) * 100)
@@ -173,7 +189,7 @@ export const CardInspectorModal: React.FC<CardInspectorModalProps> = ({
           {/* Top Pedestal Tag */}
           <div className="relative z-10 w-full flex items-center justify-between text-xs font-sans font-semibold text-slate-300">
             <span className={`px-2.5 py-0.5 rounded-lg border ${rarityTheme.bg} ${rarityTheme.border} ${rarityTheme.text} font-display font-bold`}>
-              {RARITY_LABELS[card.rarity]}
+              {activeRarity === 5 ? '🌈 EXOTIC' : RARITY_LABELS[activeRarity]}
             </span>
             <span className="font-mono text-slate-400 tabular-nums">
               #{String(card.id + 1).padStart(3, '0')} / {ALL_CARDS.length}
@@ -181,9 +197,11 @@ export const CardInspectorModal: React.FC<CardInspectorModalProps> = ({
           </div>
 
           {/* Interactive 3D Photocard */}
-          <div className="relative z-10 flex flex-col items-center gap-2 my-1">
+          <div className="relative z-10 flex flex-col items-center gap-2 my-1 w-full">
             <Photocard3D
               card={card}
+              effectiveRarity={activeRarity}
+              rarityMask={rarityMask}
               level={level}
               awakeningStars={awakeningStars}
               synergyBonus={synergyBonus}
@@ -193,10 +211,17 @@ export const CardInspectorModal: React.FC<CardInspectorModalProps> = ({
               isBias={isBias}
               decoFrame={decoFrame}
               interactive3D={true}
+              onClick={() => setCleanArtFullscreen(true)}
             />
-            <span className="text-[11px] font-sans text-slate-400">
-              Geser kursor di kartu untuk efek 3D Hologram
-            </span>
+            <button
+              type="button"
+              data-testid="toggle-clean-art-preview-btn"
+              onClick={() => setCleanArtFullscreen(true)}
+              className="w-full min-h-[34px] px-3 py-1.5 rounded-xl bg-white/10 hover:bg-sky-500/25 border border-white/15 hover:border-sky-400/50 text-xs font-display font-bold text-sky-300 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <Maximize2 className="w-3.5 h-3.5" />
+              <span>Preview Full-Screen HD (Tanpa Teks)</span>
+            </button>
           </div>
 
           {/* 3-Pill Card Progression Summary */}
@@ -611,6 +636,55 @@ export const CardInspectorModal: React.FC<CardInspectorModalProps> = ({
           </div>
         </div>
       </div>
+
+      {/* FULL-SCREEN HD CLEAN ART PREVIEW OVERLAY (POKÉMON TCG POCKET IMMERSIVE VIEW) */}
+      {cleanArtFullscreen && (
+        <div
+          data-testid="clean-art-fullscreen-modal"
+          className="fixed inset-0 z-[60] bg-[#04060E]/95 backdrop-blur-xl flex flex-col items-center justify-center p-4 select-none"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setCleanArtFullscreen(false);
+          }}
+        >
+          <div className="flex flex-col items-center gap-4 max-w-md w-full">
+            <div className="w-full flex items-center justify-between px-2">
+              <div className="flex items-center gap-2">
+                <Eye className="w-4 h-4 text-sky-400" />
+                <span className="text-sm font-display font-bold text-white">
+                  {card.name} ({card.group}) · Clean Art HD
+                </span>
+              </div>
+              <button
+                type="button"
+                data-testid="close-clean-art-preview-btn"
+                onClick={() => setCleanArtFullscreen(false)}
+                className="px-3.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-xs font-display font-bold text-white flex items-center gap-1.5 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+                <span>Tutup Preview</span>
+              </button>
+            </div>
+
+            <Photocard3D
+              card={card}
+              effectiveRarity={activeRarity}
+              rarityMask={rarityMask}
+              level={level}
+              awakeningStars={awakeningStars}
+              synergyBonus={synergyBonus}
+              gradeTier={gradeTier}
+              size="xl"
+              decoFrame={decoFrame}
+              interactive3D={true}
+              cleanArtMode={true}
+            />
+
+            <p className="text-xs font-sans text-slate-300 text-center">
+              Geser kursor di atas photocard untuk melihat kilau hologram 3D tanpa tertutup teks status.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

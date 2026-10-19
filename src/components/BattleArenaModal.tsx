@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ABILITIES,
   ALL_CARDS,
@@ -89,6 +89,11 @@ export const BattleArenaModal: React.FC<BattleArenaModalProps> = ({
   const subIdx = stageIndex % 5;
   const city = WORLD_TOUR_CITIES[cityIdx] || WORLD_TOUR_CITIES[0];
   const stageMeta = STAGE_ROLES_INFO[subIdx] || STAGE_ROLES_INFO[0];
+
+  const playerSynergy = useMemo(() => {
+    const cards = saveState.deck.map((id) => ALL_CARDS[id]).filter(Boolean);
+    return calculateUnitSynergy(cards, saveState.biasCardId, saveState.biasBondXp);
+  }, [saveState.deck, saveState.biasCardId, saveState.biasBondXp]);
 
   const [units, setUnits] = useState<CombatUnit[]>([]);
   const [roundNum, setRoundNum] = useState<number>(1);
@@ -205,12 +210,20 @@ export const BattleArenaModal: React.FC<BattleArenaModalProps> = ({
       const lv = saveState.lv[c.id] || 1;
       const st = saveState.stars[c.id] || 0;
       const gradeTier = saveState.cardGrades?.[c.id] || 0;
+      const effRarity = saveState.cardRarity?.[c.id] ?? c.rarity;
       const towerRoleBonus =
         isTowerBattle && towerInfo && c.role === towerInfo.benefitedRole ? 0.25 : 0;
-      const stats = getCardStats(c, lv, st, synergy.totalBonus + towerRoleBonus, gradeTier);
+      const stats = getCardStats(
+        c,
+        lv,
+        st,
+        synergy.totalBonus + towerRoleBonus,
+        gradeTier,
+        effRarity
+      );
       initialUnits.push({
         uid: `ally-${idx}-${c.id}`,
-        card: c,
+        card: { ...c, rarity: effRarity },
         side: 0,
         level: lv,
         awakeningStars: st,
@@ -528,7 +541,7 @@ export const BattleArenaModal: React.FC<BattleArenaModalProps> = ({
               fromIndex: Math.max(0, fromIdx),
               toIndex: Math.max(0, toIdx),
               role: actor.card.role,
-              color: ROLES[actor.card.role]?.color || actor.card.accentColor,
+              color: actor.card.accentColor || '#38BDF8',
             });
             setUnits([...initialUnits]);
             await wait(190);
@@ -1008,29 +1021,37 @@ export const BattleArenaModal: React.FC<BattleArenaModalProps> = ({
           data-testid="battle-allies-row"
           className="w-full grid grid-cols-5 gap-1.5 sm:gap-3 justify-items-center"
         >
-          {allies.map((u) => (
-            <div
-              key={u.uid}
-              className={`relative flex flex-col items-center transition-all duration-200 ${
-                u.hp <= 0
-                  ? 'opacity-25 grayscale scale-90'
-                  : u.isActing
-                  ? '-translate-y-8 sm:-translate-y-14 scale-115 sm:scale-125 rotate-2 z-30 drop-shadow-[0_0_32px_rgba(56,189,248,0.95)]'
-                  : u.isHit
-                  ? 'translate-y-3 -translate-x-2 -rotate-6 scale-95 brightness-150'
-                  : ''
-              }`}
-            >
-              <Photocard3D
-                card={u.card}
-                level={u.level}
-                awakeningStars={u.awakeningStars}
-                size="xs"
-                isBias={saveState.biasCardId === u.card.id}
-                decoFrame={saveState.cardDeco?.[u.card.id]}
-                gradeTier={saveState.cardGrades?.[u.card.id] || 0}
-                interactive3D={false}
-              />
+          {allies.map((u) => {
+            const towerRoleBonus =
+              isTowerBattle && towerInfo && u.card.role === towerInfo.benefitedRole ? 0.25 : 0;
+            const allySynergyBonus = playerSynergy.totalBonus + towerRoleBonus;
+
+            return (
+              <div
+                key={u.uid}
+                className={`relative flex flex-col items-center transition-all duration-200 ${
+                  u.hp <= 0
+                    ? 'opacity-25 grayscale scale-90'
+                    : u.isActing
+                    ? '-translate-y-8 sm:-translate-y-14 scale-115 sm:scale-125 rotate-2 z-30 drop-shadow-[0_0_32px_rgba(56,189,248,0.95)]'
+                    : u.isHit
+                    ? 'translate-y-3 -translate-x-2 -rotate-6 scale-95 brightness-150'
+                    : ''
+                }`}
+              >
+                <Photocard3D
+                  card={u.card}
+                  effectiveRarity={saveState.cardRarity?.[u.card.id] ?? u.card.rarity}
+                  rarityMask={saveState.cardRarityMask?.[u.card.id]}
+                  level={u.level}
+                  awakeningStars={u.awakeningStars}
+                  synergyBonus={allySynergyBonus}
+                  size="xs"
+                  isBias={saveState.biasCardId === u.card.id}
+                  decoFrame={saveState.cardDeco?.[u.card.id]}
+                  gradeTier={saveState.cardGrades?.[u.card.id] || 0}
+                  interactive3D={false}
+                />
               {renderSlashVfx(u.slashVfx)}
               {/* HP & Energy Bars */}
               <div className="w-[62px] sm:w-40 mt-1 px-0.5 space-y-0.5">
@@ -1057,7 +1078,8 @@ export const BattleArenaModal: React.FC<BattleArenaModalProps> = ({
                 </div>
               )}
             </div>
-          ))}
+          );
+        })}
         </div>
       </div>
 

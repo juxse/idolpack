@@ -1,4 +1,4 @@
-export type RarityIndex = 0 | 1 | 2 | 3 | 4; // 0: Common, 1: Rare, 2: Epic, 3: Legendary, 4: Mythic
+export type RarityIndex = 0 | 1 | 2 | 3 | 4 | 5; // 0: Common, 1: Rare, 2: Epic, 3: Legendary, 4: Mythic, 5: 🌈 EXOTIC
 export type RoleIndex = 0 | 1 | 2 | 3; // 0: Vocal, 1: Dancer, 2: Rapper, 3: Visual
 
 export interface AbilityDef {
@@ -60,12 +60,12 @@ export interface QuestDef {
   isMilestone?: boolean;
 }
 
-export const RARITY_CODES = ['C', 'R', 'E', 'L', 'M'] as const;
-export const RARITY_LABELS = ['Common', 'Rare', 'Epic', 'Legendary', 'Mythic'] as const;
-export const RARITY_WEIGHTS = [56, 28, 11.5, 3.6, 0.9] as const; // Balanced TCG rates
-export const BASE_HP_BY_RARITY = [110, 155, 220, 320, 470] as const;
-export const BASE_ATK_BY_RARITY = [16, 23, 33, 46, 66] as const;
-export const DUPLICATE_COIN_REWARD = [20, 45, 110, 260, 650] as const;
+export const RARITY_CODES = ['C', 'R', 'E', 'L', 'M', 'EX'] as const;
+export const RARITY_LABELS = ['Common', 'Rare', 'Epic', 'Legendary', 'Mythic', 'Exotic'] as const;
+export const RARITY_WEIGHTS = [56, 26, 12, 4.3, 1.2, 0.5] as const; // Balanced TCG rates with 0.5% Exotic
+export const BASE_HP_BY_RARITY = [110, 155, 220, 320, 470, 620] as const;
+export const BASE_ATK_BY_RARITY = [16, 23, 33, 46, 66, 88] as const;
+export const DUPLICATE_COIN_REWARD = [20, 45, 110, 260, 650, 1500] as const;
 
 export const ROLES: Array<{ id: RoleIndex; name: string; short: string; icon: string; bonusDesc: string }> = [
   { id: 0, name: 'Main Vocal', short: 'Vocal', icon: '🎤', bonusDesc: 'Unggul lawan Dancer (+25% DMG) · Ultimate Heal Tim' },
@@ -222,10 +222,12 @@ function deterministicHash(str: string): number {
 
 const ABILITY_KEYS = Object.keys(ABILITIES);
 
-// Special curated Mythic / Legendary Center Idols so fan-favorites feel authentic
+// Special curated Mythic / Legendary / Rare Idols (Wonyoung, Yujin, Woni explicitly set to Rare 1 as requested)
 const ICONIC_RARITY_OVERRIDES: Record<string, RarityIndex> = {
-  'Wonyoung|IVE': 4,
-  'Yujin|IVE': 4,
+  'Wonyoung|IVE': 1,
+  'Yujin|IVE': 1,
+  'Yujin|Kep1er': 1,
+  'Woni|RESCENE': 1,
   'Karina|aespa': 4,
   'Winter|aespa': 4,
   'Jennie|BLACKPINK': 4,
@@ -247,7 +249,6 @@ const ICONIC_RARITY_OVERRIDES: Record<string, RarityIndex> = {
   'Natty|KISS OF LIFE': 4,
   'Bang Jeemin|izna': 4,
   'Jiyu|KiiiKiii': 4,
-  'Woni|RESCENE': 4,
   'Carmen|Hearts2Hearts': 4,
   'Jiwoo|Hearts2Hearts': 3,
   'Ella|MEOVV': 4,
@@ -256,7 +257,7 @@ const ICONIC_RARITY_OVERRIDES: Record<string, RarityIndex> = {
 };
 
 export const ALL_CARDS: IdolCard[] = [];
-export const CARDS_BY_RARITY: IdolCard[][] = [[], [], [], [], []];
+export const CARDS_BY_RARITY: IdolCard[][] = [[], [], [], [], [], []];
 
 RAW_GROUPS.forEach(([group, debutYear, era, accentColor, _tierWeight, membersCsv]) => {
   const memberList = membersCsv.split(',').map((s) => s.trim());

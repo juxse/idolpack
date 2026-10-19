@@ -8,12 +8,25 @@ import {
 } from 'lucide-react';
 import { BOOSTER_BANNERS, RARITY_LABELS } from '../game/data';
 import type { BoosterPackBanner, IdolCard } from '../game/data';
-import { FATE_POINT_PITY_MAX } from '../game/rules';
+import {
+  FATE_POINT_PITY_MAX,
+  getBannerCollectionStats,
+  PITY_EXOTIC_MAX,
+  PITY_LEGEND_MAX,
+  PITY_MYTHIC_MAX,
+} from '../game/rules';
 import type { PullOutcomeItem, SaveState } from '../game/rules';
 import { Photocard3D, PhotocardBack3D } from './Photocard3D';
 import { sound } from '../utils/sound';
 
-const RARITY_HEX_COLORS = ['#94A3B8', '#38BDF8', '#A855F7', '#F59E0B', '#FF4FA3'] as const;
+const RARITY_HEX_COLORS = [
+  '#94A3B8',
+  '#38BDF8',
+  '#A855F7',
+  '#F59E0B',
+  '#FF4FA3',
+  '#67E8F9',
+] as const;
 
 interface PackRipViewProps {
   saveState: SaveState;
@@ -62,6 +75,7 @@ export const PackRipView: React.FC<PackRipViewProps> = ({
 
   const canPull5 = saveState.freePacks > 0 || saveState.coins >= activeBanner.costPack5;
   const canPull1 = saveState.coins >= activeBanner.costSingle;
+  const bannerDexStats = getBannerCollectionStats(saveState, activeBanner.id);
 
   const handleFlipCard = (idx: number) => {
     if (flippedIndices[idx]) {
@@ -69,7 +83,12 @@ export const PackRipView: React.FC<PackRipViewProps> = ({
       return;
     }
     const item = pulledItems[idx];
-    sound.playCardReveal(item.card.rarity);
+    const r = item.pulledRarity ?? item.card.rarity;
+    if (r === 5) {
+      sound.playVictory();
+    } else {
+      sound.playCardReveal(r);
+    }
     setFlippedIndices((prev) => ({ ...prev, [idx]: true }));
   };
 
@@ -78,9 +97,14 @@ export const PackRipView: React.FC<PackRipViewProps> = ({
     let highestRarity = 0;
     pulledItems.forEach((it, idx) => {
       next[idx] = true;
-      if (it.card.rarity > highestRarity) highestRarity = it.card.rarity;
+      const r = it.pulledRarity ?? it.card.rarity;
+      if (r > highestRarity) highestRarity = r;
     });
-    sound.playCardReveal(highestRarity);
+    if (highestRarity === 5) {
+      sound.playVictory();
+    } else {
+      sound.playCardReveal(highestRarity);
+    }
     setFlippedIndices(next);
   };
 
@@ -130,18 +154,53 @@ export const PackRipView: React.FC<PackRipViewProps> = ({
                 })}
               </div>
 
-              {/* Right Pity Counters */}
-              <div className="flex flex-wrap items-center justify-between lg:justify-end gap-2 shrink-0">
-                <div className="flex items-center gap-2 text-[11px] font-mono text-slate-300 bg-black/45 px-3 py-1.5 rounded-xl border border-white/10 tabular-nums">
-                  <span>
-                    Legend Pity:{' '}
-                    <strong className="text-amber-300">{saveState.pityLegend}/80</strong>
-                  </span>
-                  <span className="text-white/20">·</span>
-                  <span>
-                    Mythic Pity:{' '}
-                    <strong className="text-pink-400">{saveState.pityMythic}/200</strong>
-                  </span>
+              {/* Right Pokémon TCG Pocket Pack Dex & Pity Counter Capsule */}
+              <div
+                data-testid="pack-dex-pity-capsule"
+                className="flex flex-wrap items-center justify-between lg:justify-end gap-2 shrink-0"
+              >
+                <div className="flex items-center gap-2.5 bg-[#070A14] px-3 py-1.5 rounded-xl border border-white/12 text-[11px] font-mono tabular-nums">
+                  <div className="flex flex-col gap-0.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-400 font-sans font-semibold text-[10px]">
+                        Pack Dex
+                      </span>
+                      <strong className="text-sky-300">
+                        {bannerDexStats.ownedInBanner}/{bannerDexStats.totalInBanner} ({bannerDexStats.pct}%)
+                      </strong>
+                    </div>
+                    <div className="w-28 h-1.5 rounded-full bg-white/10 overflow-hidden">
+                      <div
+                        style={{ width: `${bannerDexStats.pct}%` }}
+                        className="h-full bg-gradient-to-r from-sky-400 to-[#FF4FA3]"
+                      />
+                    </div>
+                  </div>
+
+                  <span className="h-6 w-[1px] bg-white/10" />
+
+                  <div className="flex items-center gap-2 text-slate-300">
+                    <span title={`Jaminan kartu Legendary dalam ${bannerDexStats.pullsUntilLegend} pull lagi`}>
+                      Legend:{' '}
+                      <strong className="text-amber-300">
+                        {bannerDexStats.legendPityProgress}/{PITY_LEGEND_MAX}
+                      </strong>
+                    </span>
+                    <span className="text-white/20">·</span>
+                    <span title={`Jaminan kartu Mythic dalam ${bannerDexStats.pullsUntilMythic} pull lagi`}>
+                      Mythic:{' '}
+                      <strong className="text-[#FF4FA3]">
+                        {bannerDexStats.mythicPityProgress}/{PITY_MYTHIC_MAX}
+                      </strong>
+                    </span>
+                    <span className="text-white/20">·</span>
+                    <span
+                      title={`Jaminan kartu 🌈 EXOTIC dalam ${bannerDexStats.pullsUntilExotic} pull lagi`}
+                      className="bg-gradient-to-r from-cyan-400 via-pink-400 to-amber-300 bg-clip-text text-transparent font-black"
+                    >
+                      Exotic: {bannerDexStats.exoticPityProgress}/{PITY_EXOTIC_MAX}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -477,34 +536,39 @@ export const PackRipView: React.FC<PackRipViewProps> = ({
           >
             {pulledItems.map((item, idx) => {
               const isFlipped = Boolean(flippedIndices[idx]);
-              const rColor = RARITY_HEX_COLORS[item.card.rarity] || '#38BDF8';
+              const pulledRarity = item.pulledRarity !== undefined ? item.pulledRarity : item.card.rarity;
+              const rColor = RARITY_HEX_COLORS[pulledRarity] || '#38BDF8';
+              const isExotic = pulledRarity === 5;
 
               return (
                 <div key={`${item.card.id}-${idx}`} className="flex flex-col items-center gap-1.5">
                   {!isFlipped ? (
                     <div className="relative">
-                      {item.card.rarity >= 2 && (
+                      {pulledRarity >= 2 && (
                         <div
                           style={{
-                            boxShadow: `0 0 28px 4px ${rColor}`,
-                            borderColor: rColor,
+                            boxShadow: isExotic
+                              ? '0 0 34px 8px rgba(56,189,248,0.95), 0 0 55px 14px rgba(255,79,163,0.8)'
+                              : `0 0 28px 4px ${rColor}`,
+                            borderColor: isExotic ? '#67E8F9' : rColor,
                           }}
                           className="pointer-events-none absolute -inset-1 rounded-[22px] border-2 animate-pulse"
                         />
                       )}
                       <PhotocardBack3D
                         size="md"
-                        accentColor={item.card.rarity >= 2 ? rColor : activeBanner.accentHex}
-                        label="KETUK BUKA"
+                        accentColor={isExotic ? '#67E8F9' : pulledRarity >= 2 ? rColor : activeBanner.accentHex}
+                        label={isExotic ? '🌈 EXOTIC!' : 'KETUK BUKA'}
                         onClick={() => handleFlipCard(idx)}
                       />
                     </div>
                   ) : (
                     <Photocard3D
                       card={item.card}
+                      effectiveRarity={pulledRarity}
+                      rarityMask={saveState.cardRarityMask?.[item.card.id]}
                       level={saveState.lv[item.card.id] || 1}
                       awakeningStars={saveState.stars[item.card.id] || 0}
-                      copies={saveState.inv[item.card.id] || 1}
                       isBias={saveState.biasCardId === item.card.id}
                       decoFrame={saveState.cardDeco?.[item.card.id]}
                       gradeTier={saveState.cardGrades?.[item.card.id] || 0}
@@ -520,9 +584,17 @@ export const PackRipView: React.FC<PackRipViewProps> = ({
                         <span className="px-2.5 py-0.5 rounded-full bg-pink-500/25 border border-pink-400/60 text-[10px] font-mono font-extrabold text-pink-200">
                           🎯 FATE PITY ENCORE!
                         </span>
+                      ) : item.isTierUpgrade ? (
+                        <span className="px-2.5 py-0.5 rounded-full bg-gradient-to-r from-cyan-500/30 via-pink-500/30 to-amber-500/30 border border-cyan-400/80 text-[10px] font-mono font-extrabold text-white animate-pulse">
+                          ⬆️ NAIK KASTA KE {RARITY_LABELS[pulledRarity].toUpperCase()}!
+                        </span>
+                      ) : isExotic ? (
+                        <span className="px-2.5 py-0.5 rounded-full bg-gradient-to-r from-cyan-400 via-pink-400 to-amber-300 text-slate-950 text-[10px] font-mono font-black shadow-[0_0_12px_rgba(56,189,248,0.8)]">
+                          🌈 JACKPOT EXOTIC!
+                        </span>
                       ) : item.isNew ? (
                         <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/50 text-[10px] font-mono font-extrabold text-emerald-300">
-                          ★ BARU · {RARITY_LABELS[item.card.rarity]}
+                          ★ BARU · {RARITY_LABELS[pulledRarity]}
                         </span>
                       ) : (
                         <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 border border-amber-400/50 text-[10px] font-mono font-bold text-amber-300">

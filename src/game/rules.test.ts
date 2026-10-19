@@ -16,8 +16,10 @@ import {
   executeWonderPick,
   FATE_POINT_PITY_MAX,
   generateStageEnemies,
+  generateStarterMythicDraft,
   generateTowerFloorEnemies,
   generateWonderPickBoards,
+  getBannerCollectionStats,
   getBiasBondInfo,
   getCardStats,
   getDailyFanChat,
@@ -27,8 +29,11 @@ import {
   GRADING_BLACK_LABEL_PITY,
   GRADING_COIN_COST,
   GRADING_DIAMOND_COST,
+  PITY_LEGEND_MAX,
+  PITY_MYTHIC_MAX,
   refreshWonderPickBoardsPaid,
   seededRng,
+  selectStarterMythicCard,
   WONDER_PICK_DAILY_LIMIT,
   WONDER_PICK_REFRESH_COST,
 } from './rules.ts';
@@ -135,6 +140,9 @@ test('group photobook dex tracks group completion and grants +350 coins & +50 bo
 
 test('daily idol fan-chat grants +80 coins and +25 bond XP once per day', () => {
   const state = createInitialSaveState();
+  const starterChoices = generateStarterMythicDraft(777);
+  selectStarterMythicCard(state, starterChoices[0].id);
+
   const sessionBefore = getDailyFanChat(state);
   assert.equal(sessionBefore.claimedToday, false);
   assert.equal(sessionBefore.options.length, 3);
@@ -262,6 +270,8 @@ test('queendom survival tower scales floors, grants boss pack tickets every 5th 
 
 test('center bias bond level increases unit synergy bonus when bias card is in deck', () => {
   const state = createInitialSaveState();
+  const draft = generateStarterMythicDraft(101);
+  selectStarterMythicCard(state, draft[0].id);
   const biasId = state.deck[0];
   state.biasCardId = biasId;
   state.biasBondXp[biasId] = 250; // Lv.3 Bond (+8% stat)
@@ -278,6 +288,8 @@ test('center bias bond level increases unit synergy bonus when bias card is in d
 
 test('PSA Card Grading Lab enforces Diamond + Coin cost, High-Watermark protection, and 8-pull Black Label Pity', () => {
   const state = createInitialSaveState();
+  const draft = generateStarterMythicDraft(202);
+  selectStarterMythicCard(state, draft[0].id);
   const cardId = state.deck[0];
   const card = ALL_CARDS[cardId];
   state.diamonds = 300;
@@ -328,12 +340,17 @@ test('PSA Card Grading Lab enforces Diamond + Coin cost, High-Watermark protecti
 
 test('idol agency schedule dispatches spare cards to earn Star Diamonds, Coins, and Bond XP once per day', () => {
   const state = createInitialSaveState();
+  const draft = generateStarterMythicDraft(303);
+  selectStarterMythicCard(state, draft[0].id);
+  // Give 2 extra cards so 3-card schedules can also run
+  state.inv[0] = 1;
+  state.inv[1] = 1;
   assert.equal(AGENCY_SCHEDULES.length, 3);
 
   const coinsBefore = state.coins;
   const diamondsBefore = state.diamonds;
 
-  // Variety Show requires 1 card (rarity 0+), starter state has 3 cards
+  // Variety Show requires 1 card (rarity 0+)
   const v1 = executeAgencySchedule(state, 'variety_show');
   assert.equal(v1.ok, true);
   assert.equal(v1.coinsGranted, 140);
@@ -355,6 +372,69 @@ test('idol agency schedule dispatches spare cards to earn Star Diamonds, Coins, 
   assert.equal(m1.diamondsGranted, 15);
   assert.equal(m1.dispatchedCards.length, 3);
 });
+
+test('new game / reset data starts with 0 idols and requires 1-of-5 random Mythic starter draft', () => {
+  const state = createInitialSaveState();
+  assert.equal(state.starterDraftCompleted, false);
+  assert.equal(Object.keys(state.inv).length, 0);
+  assert.equal(state.deck.length, 0);
+  assert.equal(state.biasCardId, null);
+  assert.equal(state.freePacks, 1);
+
+  const draft = generateStarterMythicDraft(42);
+  assert.equal(draft.length, 5);
+  const uniqueIds = new Set(draft.map((c) => c.id));
+  assert.equal(uniqueIds.size, 5);
+  assert.equal(draft.every((c) => c.rarity === 4), true);
+
+  // Rejects non-mythic card
+  const commonCard = ALL_CARDS.find((c) => c.rarity === 0)!;
+  const badPick = selectStarterMythicCard(state, commonCard.id);
+  assert.equal(badPick.ok, false);
+
+  // Accepts chosen Mythic card and gives strictly 1 card + 1 free pack ticket
+  const chosenMythic = draft[2];
+  const goodPick = selectStarterMythicCard(state, chosenMythic.id);
+  assert.equal(goodPick.ok, true);
+  assert.equal(state.starterDraftCompleted, true);
+  assert.equal(Object.keys(state.inv).length, 1);
+  assert.equal(state.inv[chosenMythic.id], 1);
+  assert.deepEqual(state.deck, [chosenMythic.id]);
+  assert.equal(state.biasCardId, chosenMythic.id);
+  assert.equal(state.freePacks, 1);
+
+  const bannerStats = getBannerCollectionStats(state, 'omni_allstar');
+  assert.equal(bannerStats.ownedInBanner, 1);
+  assert.equal(bannerStats.pullsUntilLegend, PITY_LEGEND_MAX);
+  assert.equal(bannerStats.pullsUntilMythic, PITY_MYTHIC_MAX);
+  assert.equal(bannerStats.pullsUntilExotic, 250);
+});
+
+test('Universal Dynamic Rarity supports pulling any idol in Common to Exotic and upgrades card tier', () => {
+  const state = createInitialSaveState();
+  const yujin = ALL_CARDS.find((c) => c.name === 'Yujin' && c.group === 'IVE')!;
+
+  // 1. Initial getCardStats scales dynamically with effectiveRarity
+  const statsCommon = getCardStats(yujin, 1, 0, 0, 0, 0); // Common
+  const statsExotic = getCardStats(yujin, 1, 0, 0, 0, 5); // 🌈 EXOTIC
+  assert.equal(statsExotic.atk > statsCommon.atk, true);
+  assert.equal(statsExotic.hp > statsCommon.hp, true);
+  assert.equal(statsExotic.power > statsCommon.power, true);
+
+  // 2. Select starter draft with Exotic jackpot support
+  const starterRes = selectStarterMythicCard(state, yujin.id, 5);
+  assert.equal(starterRes.ok, true);
+  assert.equal(state.cardRarity?.[yujin.id], 5);
+  assert.equal((state.cardRarityMask?.[yujin.id] || 0) & (1 << 5), 1 << 5);
+
+  // 3. Banner pull triggers hard Exotic pity at 250
+  state.pityExotic = 249;
+  const pull = executeBannerPull(state, 'omni_allstar', 1, () => 0.5);
+  assert.equal(pull.ok, true);
+  assert.equal(pull.items[0].pulledRarity, 5); // Guaranteed Exotic on 250th pull!
+  assert.equal(state.pityExotic, 0); // Reset after Exotic pull
+});
+
 
 
 

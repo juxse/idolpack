@@ -1,5 +1,7 @@
 import {
   ALL_CARDS,
+  BASE_ATK_BY_RARITY,
+  BASE_HP_BY_RARITY,
   BOOSTER_BANNERS,
   CARDS_BY_RARITY,
   DUPLICATE_COIN_REWARD,
@@ -107,8 +109,11 @@ export interface SaveState {
   freePacks: number; // free starter / hourglass packs
   lastFreeClaim: number; // timestamp ms
   dailyBonusClaimed: boolean; // strictly 1x per day bonus coin claim
-  pityLegend: number; // 0..80
-  pityMythic: number; // 0..200
+  pityLegend: number; // 0..70
+  pityMythic: number; // 0..180
+  pityExotic?: number; // 0..250 Hard Pity counter for 🌈 EXOTIC
+  cardRarity?: Record<number, RarityIndex>; // cardId -> highest pulled rarity (0..5)
+  cardRarityMask?: Record<number, number>; // cardId -> 6-bit mask of unlocked variants (1 << rarity)
   dailyDate: string;
   dailyCounts: Record<string, number>;
   dailyClaimed: Record<string, boolean>;
@@ -124,9 +129,13 @@ export interface SaveState {
   towerPatrolDate: string; // date string when Daily Tower Patrol was claimed
   agencyScheduleClaimed: Record<string, boolean>; // scheduleId -> claimed today
   agencyScheduleAssigned: Record<string, number[]>; // scheduleId -> dispatched cardIds today
+  starterDraftCompleted?: boolean; // true once player picks 1 of 5 random Mythic cards on New Game / Reset Data
 }
 
 export const FATE_POINT_PITY_MAX = 15;
+export const PITY_LEGEND_MAX = 70;
+export const PITY_MYTHIC_MAX = 180;
+export const PITY_EXOTIC_MAX = 250;
 export const WONDER_PICK_DAILY_LIMIT = 3;
 export const WONDER_PICK_REFRESH_COST = 100;
 export const GRADING_DIAMOND_COST = 25;
@@ -170,33 +179,16 @@ export function claimDailyBonusCoins(state: SaveState): {
 }
 
 export function createInitialSaveState(): SaveState {
-  // Give player 3 iconic starter cards so they can immediately inspect or battle, plus 1 free pack & 680 coins!
-  const starterIds = [
-    ALL_CARDS.find((c) => c.name === 'Yujin' && c.group === 'IVE')?.id ?? 0,
-    ALL_CARDS.find((c) => c.name === 'Jiyu' && c.group === 'KiiiKiii')?.id ?? 1,
-    ALL_CARDS.find((c) => c.name === 'Woni' && c.group === 'RESCENE')?.id ?? 2,
-  ];
-  const inv: Record<number, number> = {};
-  const lv: Record<number, number> = {};
-  const stars: Record<number, number> = {};
-  const biasBondXp: Record<number, number> = {};
-  starterIds.forEach((id) => {
-    inv[id] = 1;
-    lv[id] = 1;
-    stars[id] = 0;
-    biasBondXp[id] = 20;
-  });
-
+  // New Game / Reset Data starts with 0 pre-assigned idols (starterDraftCompleted: false).
+  // The player immediately enters the Producer Debut Draft to pick 1 of 5 random Mythic cards + 1 Free Pack ticket!
   return {
-    inv,
-    lv,
-    stars,
-    deck: [...starterIds],
-    biasCardId: starterIds[0],
-    biasBondXp,
-    cardDeco: {
-      [starterIds[0]]: 'starlight',
-    },
+    inv: {},
+    lv: {},
+    stars: {},
+    deck: [],
+    biasCardId: null,
+    biasBondXp: {},
+    cardDeco: {},
     cardGrades: {},
     cardGradeAttempts: {},
     wonderPickFreeUsedToday: false,
@@ -212,6 +204,9 @@ export function createInitialSaveState(): SaveState {
     dailyBonusClaimed: false,
     pityLegend: 0,
     pityMythic: 0,
+    pityExotic: 0,
+    cardRarity: {},
+    cardRarityMask: {},
     dailyDate: new Date().toDateString(),
     dailyCounts: { roll: 0, win: 0, upgrade: 0, ultimate: 0, pack5: 0 },
     dailyClaimed: {},
@@ -227,6 +222,111 @@ export function createInitialSaveState(): SaveState {
     towerPatrolDate: '',
     agencyScheduleClaimed: {},
     agencyScheduleAssigned: {},
+    starterDraftCompleted: false,
+  };
+}
+
+/**
+ * Generates 5 unique random cards for the Producer Debut Draft on New Game launch or Reset Data.
+ * By default cards are Mythic (Crown EX), with a jackpot chance for 🌈 EXOTIC.
+ */
+export function generateStarterMythicDraft(seed: number = Date.now()): IdolCard[] {
+  const mythicPool = [
+    ...(CARDS_BY_RARITY[4] && CARDS_BY_RARITY[4].length >= 5
+      ? CARDS_BY_RARITY[4]
+      : ALL_CARDS.filter((c) => c.rarity === 4)),
+  ];
+  const rng = seededRng(seed);
+  for (let i = mythicPool.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    const tmp = mythicPool[i];
+    mythicPool[i] = mythicPool[j];
+    mythicPool[j] = tmp;
+  }
+  return mythicPool.slice(0, 5);
+}
+
+/**
+ * Commits the player's 1 chosen starter card from the 5 random draft choices,
+ * setting it as their Center Bias and sole initial unit member, plus 1 Free Pack ticket.
+ * Supports both Mythic (4) and 🌈 EXOTIC (5) jackpot cards!
+ */
+export function selectStarterMythicCard(
+  state: SaveState,
+  chosenCardId: number,
+  chosenRarity?: RarityIndex
+): {
+  ok: boolean;
+  card?: IdolCard;
+  reason?: string;
+} {
+  const baseCard = ALL_CARDS[chosenCardId];
+  if (!baseCard) {
+    return { ok: false, reason: 'Kartu idol tidak ditemukan.' };
+  }
+  const targetRarity = chosenRarity !== undefined ? chosenRarity : baseCard.rarity;
+  if (targetRarity < 4) {
+    return { ok: false, reason: 'Kartu starter harus berstatus Mythic (Crown EX) atau 🌈 EXOTIC.' };
+  }
+
+  const effectiveRarity: RarityIndex = targetRarity >= 4 ? targetRarity : 4;
+  const card: IdolCard = { ...baseCard, rarity: effectiveRarity };
+  state.inv = { [card.id]: 1 };
+  state.cardRarity = { [card.id]: effectiveRarity };
+  state.cardRarityMask = { [card.id]: 1 << effectiveRarity };
+  state.lv = { [card.id]: 1 };
+  state.stars = { [card.id]: 0 };
+  state.deck = [card.id];
+  state.biasCardId = card.id;
+  state.biasBondXp = { [card.id]: 25 };
+  state.cardDeco = { [card.id]: effectiveRarity === 5 ? 'starlight' : 'crown' };
+  state.freePacks = Math.max(1, state.freePacks || 0);
+  state.starterDraftCompleted = true;
+
+  return { ok: true, card };
+}
+
+export interface BannerCollectionStats {
+  bannerId: string;
+  ownedInBanner: number;
+  totalInBanner: number;
+  pct: number;
+  pullsUntilLegend: number;
+  pullsUntilMythic: number;
+  pullsUntilExotic: number;
+  legendPityProgress: number;
+  mythicPityProgress: number;
+  exoticPityProgress: number;
+}
+
+export function getBannerCollectionStats(
+  state: SaveState,
+  bannerId: string
+): BannerCollectionStats {
+  const banner = BOOSTER_BANNERS.find((b) => b.id === bannerId) || BOOSTER_BANNERS[0];
+  const pool =
+    banner.featuredGroups.length > 0
+      ? ALL_CARDS.filter((c) => banner.featuredGroups.includes(c.group))
+      : ALL_CARDS;
+  const totalInBanner = pool.length;
+  const ownedInBanner = pool.filter((c) => (state.inv[c.id] || 0) > 0).length;
+  const pct = totalInBanner > 0 ? Math.round((ownedInBanner / totalInBanner) * 100) : 0;
+
+  const legendPityProgress = Math.min(PITY_LEGEND_MAX, state.pityLegend || 0);
+  const mythicPityProgress = Math.min(PITY_MYTHIC_MAX, state.pityMythic || 0);
+  const exoticPityProgress = Math.min(PITY_EXOTIC_MAX, state.pityExotic || 0);
+
+  return {
+    bannerId: banner.id,
+    ownedInBanner,
+    totalInBanner,
+    pct,
+    pullsUntilLegend: Math.max(1, PITY_LEGEND_MAX - legendPityProgress),
+    pullsUntilMythic: Math.max(1, PITY_MYTHIC_MAX - mythicPityProgress),
+    pullsUntilExotic: Math.max(1, PITY_EXOTIC_MAX - exoticPityProgress),
+    legendPityProgress,
+    mythicPityProgress,
+    exoticPityProgress,
   };
 }
 
@@ -241,14 +341,19 @@ export function getCardStats(
   level = 1,
   awakeningStars = 0,
   synergyBonus = 0,
-  gradeTier: CardGradeTier = 0
+  gradeTier: CardGradeTier = 0,
+  effectiveRarity?: RarityIndex
 ) {
   const gradeBonus = getCardGradeInfo(gradeTier).statBonus;
   const mult = getLevelMultiplier(level, awakeningStars) * (1 + synergyBonus) * (1 + gradeBonus);
-  const atk = Math.round(card.baseAtk * mult);
-  const hp = Math.round(card.baseHp * mult);
+  const baseRarity = card.rarity;
+  const activeRarity = effectiveRarity !== undefined ? effectiveRarity : baseRarity;
+  const hpRatio = BASE_HP_BY_RARITY[activeRarity] / BASE_HP_BY_RARITY[baseRarity];
+  const atkRatio = BASE_ATK_BY_RARITY[activeRarity] / BASE_ATK_BY_RARITY[baseRarity];
+  const atk = Math.round(card.baseAtk * atkRatio * mult);
+  const hp = Math.round(card.baseHp * hpRatio * mult);
   const power = Math.round(atk * 4.2 + hp);
-  return { atk, hp, power, mult, gradeBonus };
+  return { atk, hp, power, mult, gradeBonus, activeRarity };
 }
 
 export interface CardGradingResult {
@@ -533,36 +638,46 @@ export function pickSingleCardFromBanner(
   minRarity: RarityIndex,
   pityLegend: number,
   pityMythic: number,
+  pityExotic: number = 0,
   randomFn: () => number = Math.random,
   focusGroup: string | null = null,
   forceGroup: string | null = null
-): { card: IdolCard; nextPityLegend: number; nextPityMythic: number } {
+): {
+  card: IdolCard;
+  pulledRarity: RarityIndex;
+  nextPityLegend: number;
+  nextPityMythic: number;
+  nextPityExotic: number;
+} {
   const banner = BOOSTER_BANNERS.find((b) => b.id === bannerId) || BOOSTER_BANNERS[0];
 
   let nextL = pityLegend + 1;
   let nextM = pityMythic + 1;
+  let nextEx = (pityExotic || 0) + 1;
 
   let roll = randomFn() * 100;
   let rarity: RarityIndex = 0;
-  for (let r = 0 as RarityIndex; r < 4; r = (r + 1) as RarityIndex) {
+  for (let r = 0 as RarityIndex; r < 6; r = (r + 1) as RarityIndex) {
     if (roll < RARITY_WEIGHTS[r]) {
       rarity = r;
       break;
     }
     roll -= RARITY_WEIGHTS[r];
-    if (r === 3) rarity = 4;
+    if (r === 5) rarity = 5;
   }
 
   // Hard Pity guarantees
-  if (nextL >= 70) rarity = Math.max(rarity, 3) as RarityIndex;
-  if (nextM >= 180) rarity = 4;
+  if (nextL >= PITY_LEGEND_MAX) rarity = Math.max(rarity, 3) as RarityIndex;
+  if (nextM >= PITY_MYTHIC_MAX) rarity = Math.max(rarity, 4) as RarityIndex;
+  if (nextEx >= PITY_EXOTIC_MAX) rarity = 5;
   rarity = Math.max(rarity, minRarity) as RarityIndex;
 
   if (rarity >= 3) nextL = 0;
-  if (rarity === 4) nextM = 0;
+  if (rarity >= 4) nextM = 0;
+  if (rarity === 5) nextEx = 0;
 
-  // Step 1: Select the candidate group pool FIRST so featured & focus groups (e.g., Hearts2Hearts, ILLIT, MEOVV)
-  // are never dropped due to rarity filtering, while keeping all 41 groups mixed in every pack.
+  // Step 1: Select the candidate group pool FIRST so featured & focus groups
+  // are never dropped, while keeping all 41 groups mixed in every pack.
   let candidatePool: IdolCard[] = ALL_CARDS;
 
   if (forceGroup) {
@@ -575,13 +690,11 @@ export function pickSingleCardFromBanner(
       : [];
 
     if (activeFocusCards.length > 0 && groupRoll < 0.18) {
-      // Balanced 18% pure pinpoint rate-up when user selects a Focus Group
       candidatePool = activeFocusCards;
     } else if (
       banner.featuredGroups.length > 0 &&
       groupRoll < (activeFocusCards.length > 0 ? 0.68 : 0.65)
     ) {
-      // Featured Banner Groups Rate-Up (with priority boost for headline subtitle groups)
       const headlineGroups = banner.featuredGroups.slice(0, 8);
       if (headlineGroups.length > 0 && randomFn() < 0.62) {
         const headlinePool = ALL_CARDS.filter((c) => headlineGroups.includes(c.group));
@@ -597,22 +710,21 @@ export function pickSingleCardFromBanner(
     }
   }
 
-  // Step 2: Filter candidatePool by rolled rarity; if no exact match in that group pool,
-  // pick a member from that group pool with >= minRarity so the group rate-up is always honored.
-  let rarityMatches = candidatePool.filter((c) => c.rarity === rarity);
-  if (rarityMatches.length === 0) {
-    rarityMatches = candidatePool.filter((c) => c.rarity >= minRarity);
-  }
-  if (rarityMatches.length === 0) {
-    rarityMatches = candidatePool;
-  }
-
-  const picked = rarityMatches[Math.floor(randomFn() * rarityMatches.length)];
-  return { card: picked, nextPityLegend: nextL, nextPityMythic: nextM };
+  const picked = candidatePool[Math.floor(randomFn() * candidatePool.length)];
+  return {
+    card: picked,
+    pulledRarity: rarity,
+    nextPityLegend: nextL,
+    nextPityMythic: nextM,
+    nextPityExotic: nextEx,
+  };
 }
 
 export interface PullOutcomeItem {
   card: IdolCard;
+  pulledRarity: RarityIndex;
+  previousMaxRarity?: RarityIndex | null;
+  isTierUpgrade?: boolean;
   isNew: boolean;
   duplicateCoins: number;
   copyNumber: number;
@@ -663,13 +775,22 @@ export function executeBannerPull(
   if (typeof state.fatePoints !== 'number') {
     state.fatePoints = 0;
   }
+  if (!state.cardRarity) {
+    state.cardRarity = {};
+  }
+  if (!state.cardRarityMask) {
+    state.cardRarityMask = {};
+  }
+  if (typeof state.pityExotic !== 'number') {
+    state.pityExotic = 0;
+  }
 
   for (let i = 0; i < count; i++) {
     // Guarantee Rare+ on last card of 5-pack, or Epic+ on last card of 10-box
     let minRarity: RarityIndex = 0;
-    if (count === 5 && i === 4 && !items.some((x) => x.card.rarity >= 1)) {
+    if (count === 5 && i === 4 && !items.some((x) => x.pulledRarity >= 1)) {
       minRarity = 1;
-    } else if (count === 10 && i === 9 && !items.some((x) => x.card.rarity >= 2)) {
+    } else if (count === 10 && i === 9 && !items.some((x) => x.pulledRarity >= 2)) {
       minRarity = 2;
     }
 
@@ -685,11 +806,12 @@ export function executeBannerPull(
       }
     }
 
-    let { card, nextPityLegend, nextPityMythic } = pickSingleCardFromBanner(
+    let { card, pulledRarity, nextPityLegend, nextPityMythic, nextPityExotic } = pickSingleCardFromBanner(
       bannerId,
       minRarity,
       state.pityLegend,
       state.pityMythic,
+      state.pityExotic || 0,
       randomFn,
       activeFocusGroup,
       forcedGroup
@@ -705,35 +827,50 @@ export function executeBannerPull(
       }
     }
 
-    // Reset Fate Points early if the player naturally rolled a member of their Focus Group?
-    // Keeping Fate Points as a steady 15-pull counter (or resetting on hit) — let's keep it accumulating up to 15 so players always see predictable progress toward their 15/15 Encore!
     state.pityLegend = nextPityLegend;
     state.pityMythic = nextPityMythic;
+    state.pityExotic = nextPityExotic;
 
     const prevCopies = state.inv[card.id] || 0;
     const isNew = prevCopies === 0;
+    const previousMaxRarity = state.cardRarity[card.id] ?? (isNew ? null : card.rarity);
+    const isTierUpgrade = !isNew && pulledRarity > (previousMaxRarity ?? card.rarity);
     let duplicateCoins = 0;
 
     if (isNew) {
+      state.cardRarity[card.id] = pulledRarity;
+      state.cardRarityMask[card.id] = 1 << pulledRarity;
       state.lv[card.id] = 1;
       state.stars[card.id] = 0;
       if (state.deck.length < 5 && !state.deck.includes(card.id)) {
         state.deck.push(card.id);
       }
     } else {
-      duplicateCoins = DUPLICATE_COIN_REWARD[card.rarity];
+      if (pulledRarity > (state.cardRarity[card.id] ?? card.rarity)) {
+        state.cardRarity[card.id] = pulledRarity;
+      }
+      state.cardRarityMask[card.id] =
+        (state.cardRarityMask[card.id] || (1 << (previousMaxRarity ?? card.rarity))) |
+        (1 << pulledRarity);
+
+      duplicateCoins = DUPLICATE_COIN_REWARD[pulledRarity];
       state.coins += duplicateCoins;
       totalDuplicateCoins += duplicateCoins;
     }
 
     state.inv[card.id] = prevCopies + 1;
     state.rolls += 1;
-    if (card.rarity > highestRarity) {
-      highestRarity = card.rarity;
+    if (pulledRarity > highestRarity) {
+      highestRarity = pulledRarity;
     }
 
+    const pulledCard: IdolCard = { ...card, rarity: pulledRarity };
+
     items.push({
-      card,
+      card: pulledCard,
+      pulledRarity,
+      previousMaxRarity,
+      isTierUpgrade,
       isNew,
       duplicateCoins,
       copyNumber: prevCopies + 1,
@@ -768,7 +905,9 @@ export interface WonderPickBoard {
   allowFreeDaily: boolean;
   accentColor: string;
   isMythicTable?: boolean;
+  isExoticTable?: boolean;
   cards: IdolCard[]; // exactly 5 cards
+  boardRarities?: RarityIndex[];
 }
 
 export function generateWonderPickBoards(seed = Date.now()): WonderPickBoard[] {
@@ -783,8 +922,69 @@ export function generateWonderPickBoards(seed = Date.now()): WonderPickBoard[] {
     return pool[Math.floor(rng() * pool.length)];
   };
 
-  // Mythic table only spawns rarely (12% chance) so Mythic cards remain prestigious and cannot be farmed easily
-  const spawnMythicJackpot = rng() < 0.12;
+  // Exotic table spawns with 8% chance, Mythic table with 14% chance
+  const spawnExoticJackpot = rng() < 0.08;
+  const spawnMythicJackpot = !spawnExoticJackpot && rng() < 0.14;
+
+  const vipTable: WonderPickBoard = spawnExoticJackpot
+    ? {
+        id: `wp-vip-exotic-${seed}`,
+        producerName: 'Produser Cosmic_Daesang',
+        title: 'Meja Jackpot Cosmic 🌈 EXOTIC (LANGKA 8%)',
+        subtitle: '1 Kartu 🌈 EXOTIC + 1 Mythic + 2 Legendary!',
+        cost: 980,
+        allowFreeDaily: false,
+        accentColor: '#38BDF8',
+        isMythicTable: true,
+        isExoticTable: true,
+        cards: [
+          pickByRarity(4),
+          pickByRarity(4),
+          pickByRarity(3),
+          pickByRarity(3),
+          pickByRarity(2),
+        ],
+        boardRarities: [5, 4, 3, 3, 2],
+      }
+    : spawnMythicJackpot
+    ? {
+        id: `wp-vip-mythic-${seed}`,
+        producerName: 'Produser Daesang_VIP',
+        title: 'Meja Jackpot Daesang (LANGKA 14%)',
+        subtitle: '1 Kartu MYTHIC EX + 1 Legendary + 2 Epic!',
+        cost: 850,
+        allowFreeDaily: false,
+        accentColor: '#FF4FA3',
+        isMythicTable: true,
+        isExoticTable: false,
+        cards: [
+          pickByRarity(4), // Mythic
+          pickByRarity(3), // Legendary
+          pickByRarity(2), // Epic
+          pickByRarity(2), // Epic
+          pickByRarity(1), // Rare
+        ],
+        boardRarities: [4, 3, 2, 2, 1],
+      }
+    : {
+        id: `wp-vip-standard-${seed}`,
+        producerName: 'Produser Inkigayo_Stage',
+        title: 'Meja Headliner All-Star',
+        subtitle: '2 Kartu Legendary EX + 2 Epic + 1 Rare',
+        cost: 520,
+        allowFreeDaily: false,
+        accentColor: '#F59E0B',
+        isMythicTable: false,
+        isExoticTable: false,
+        cards: [
+          pickByRarity(3), // Legendary
+          pickByRarity(3), // Legendary
+          pickByRarity(2), // Epic
+          pickByRarity(2), // Epic
+          pickByRarity(1), // Rare
+        ],
+        boardRarities: [3, 3, 2, 2, 1],
+      };
 
   return [
     {
@@ -803,6 +1003,7 @@ export function generateWonderPickBoards(seed = Date.now()): WonderPickBoard[] {
         pickByRarity(0), // Common
         pickByRarity(0), // Common
       ],
+      boardRarities: [2, 1, 1, 0, 0],
     },
     {
       id: `wp-encore-${seed}`,
@@ -820,42 +1021,9 @@ export function generateWonderPickBoards(seed = Date.now()): WonderPickBoard[] {
         pickByRarity(1), // Rare
         pickByRarity(0), // Common
       ],
+      boardRarities: [3, 2, 2, 1, 0],
     },
-    spawnMythicJackpot
-      ? {
-          id: `wp-vip-mythic-${seed}`,
-          producerName: 'Produser Daesang_VIP',
-          title: 'Meja Jackpot Daesang (LANGKA 12%)',
-          subtitle: '1 Kartu MYTHIC EX + 1 Legendary + 2 Epic!',
-          cost: 850,
-          allowFreeDaily: false,
-          accentColor: '#FF4FA3',
-          isMythicTable: true,
-          cards: [
-            pickByRarity(4), // Mythic
-            pickByRarity(3), // Legendary
-            pickByRarity(2), // Epic
-            pickByRarity(2), // Epic
-            pickByRarity(1), // Rare
-          ],
-        }
-      : {
-          id: `wp-vip-standard-${seed}`,
-          producerName: 'Produser Inkigayo_Stage',
-          title: 'Meja Headliner All-Star',
-          subtitle: '2 Kartu Legendary EX + 2 Epic + 1 Rare',
-          cost: 520,
-          allowFreeDaily: false,
-          accentColor: '#F59E0B',
-          isMythicTable: false,
-          cards: [
-            pickByRarity(3), // Legendary
-            pickByRarity(3), // Legendary
-            pickByRarity(2), // Epic
-            pickByRarity(2), // Epic
-            pickByRarity(1), // Rare
-          ],
-        },
+    vipTable,
   ];
 }
 
@@ -933,30 +1101,47 @@ export function executeWonderPick(
   }
   state.wonderPickDailyCount = usedCount + 1;
 
-  // Fisher-Yates shuffle of the 5 cards
-  const shuffled = [...board.cards];
-  for (let i = shuffled.length - 1; i > 0; i--) {
+  const cardRarities = board.boardRarities || board.cards.map((c) => c.rarity);
+  const itemsToShuffle = board.cards.map((c, i) => ({ card: c, r: cardRarities[i] }));
+  for (let i = itemsToShuffle.length - 1; i > 0; i--) {
     const j = Math.floor(randomFn() * (i + 1));
-    const temp = shuffled[i];
-    shuffled[i] = shuffled[j];
-    shuffled[j] = temp;
+    const temp = itemsToShuffle[i];
+    itemsToShuffle[i] = itemsToShuffle[j];
+    itemsToShuffle[j] = temp;
   }
 
-  const safeSlot = Math.max(0, Math.min(shuffled.length - 1, chosenSlotIndex));
-  const card = shuffled[safeSlot];
+  const safeSlot = Math.max(0, Math.min(itemsToShuffle.length - 1, chosenSlotIndex));
+  const pickedEntry = itemsToShuffle[safeSlot];
+  const card = pickedEntry.card;
+  const rolledRarity: RarityIndex = pickedEntry.r ?? card.rarity;
+  const shuffledCards = itemsToShuffle.map((it) => it.card);
+
+  if (!state.cardRarity) state.cardRarity = {};
+  if (!state.cardRarityMask) state.cardRarityMask = {};
 
   const prevCopies = state.inv[card.id] || 0;
   const isNew = prevCopies === 0;
+  const previousMaxRarity = state.cardRarity[card.id] ?? (isNew ? null : card.rarity);
+  const isTierUpgrade = !isNew && rolledRarity > (previousMaxRarity ?? card.rarity);
   let duplicateCoins = 0;
 
   if (isNew) {
+    state.cardRarity[card.id] = rolledRarity;
+    state.cardRarityMask[card.id] = 1 << rolledRarity;
     state.lv[card.id] = 1;
     state.stars[card.id] = 0;
     if (state.deck.length < 5 && !state.deck.includes(card.id)) {
       state.deck.push(card.id);
     }
   } else {
-    duplicateCoins = DUPLICATE_COIN_REWARD[card.rarity];
+    if (rolledRarity > (state.cardRarity[card.id] ?? card.rarity)) {
+      state.cardRarity[card.id] = rolledRarity;
+    }
+    state.cardRarityMask[card.id] =
+      (state.cardRarityMask[card.id] || (1 << (previousMaxRarity ?? card.rarity))) |
+      (1 << rolledRarity);
+
+    duplicateCoins = DUPLICATE_COIN_REWARD[rolledRarity];
     state.coins += duplicateCoins;
   }
 
@@ -970,9 +1155,12 @@ export function executeWonderPick(
     usedFreeDaily: isFree,
     costPaid: cost,
     chosenIndex: safeSlot,
-    shuffledCards: shuffled,
+    shuffledCards,
     pickedItem: {
-      card,
+      card: { ...card, rarity: rolledRarity },
+      pulledRarity: rolledRarity,
+      previousMaxRarity,
+      isTierUpgrade,
       isNew,
       duplicateCoins,
       copyNumber: prevCopies + 1,

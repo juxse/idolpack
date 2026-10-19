@@ -1,98 +1,100 @@
-# Single-Viewport Desktop Architecture, Immersive 5v5 Battle & Idol Agency Schedule
+# IDOL POCKET 3D — Universal Dynamic Rarity, Tier Baru "EXOTIC (Rainbow EX)" & Pokémon TCG Pocket Home Redesign
 
-Upgrade **IDOL POCKET 3D** so every core Desktop screen (**Pack 3D**, **Binder**, **Queendom Survival Tower**, and **5v5 Battle Arena**) fits cleanly into a **Single-Viewport Frame (1 Section per Screen without scrolling to play)**, eliminates the empty right-side space in the Binder with a **5-Card Balanced Grid**, overhauls the **5v5 Live Battle** with physical card lunges, elemental projectiles, and interactive Lightstick Fan-Chant boosting, and introduces the **Idol Agency Schedule** for farming Star Diamonds (`💎`) and Star Coins (`🪙`) using spare photocards.
+Perombakan sistem koleksi dan *gacha* yang memungkinkan **seluruh 256 idol dari 41 grup diperoleh dalam 6 kasta Rarity berbeda (`Common · Rare · Epic · Legendary · Mythic · 🌈 EXOTIC`)** murni melalui *Gacha Pack 3D*, *Wonder Pick*, dan *Starter Draft*, dilengkapi **6 Ikon Permata Varian Rarity** di setiap kartu, efek **Prismatic Rainbow EX**, **Exotic Pity Counter**, serta desain ulang halaman **Beranda (Home)** bergaya **Pokémon TCG Pocket**.
+
+---
 
 ## User Review & Critical Decisions
 
 > [!IMPORTANT]
-> All design and gameplay preferences confirmed during our clarification step are locked in below:
+> Seluruh mekanisme *Universal Dynamic Rarity*, tier tertinggi baru **EXOTIC**, serta perombakan UI telah dikonfirmasi bersama pengguna:
 
-- **Confirmed Decision 1 — Single-Viewport Section Layout & 5-Card Balanced Grid**:
-  - **Binder & Stage Unit**: Divided into dedicated full-screen sub-sections (**Koleksi 3D Binder**, **Formasi 5v5 Stage Unit**, and **Jadwal Agensi**) inside a widened `1280px` (`max-w-7xl`) container. The Binder uses a **5-Column Balanced Grid (`lg:grid-cols-5`)** so 5 cards fill the entire row symmetrically with zero empty space on the right.
-  - **Queendom Survival Tower & World Tour**: Fits 100% inside a single Desktop frame without scrolling. The **"⚔️ Tantang Lantai Sekarang"** play button is promoted to the **top-right header** of the floor spotlight panel, and all **5 Rival Cards** sit in a single horizontal row (`grid-cols-5`) without wrapping into a second row.
-  - **Pack 3D Single-Viewport Studio**: Consolidates the Pack Selection & Reveal Theater into a strict single-viewport frame (`overflow-hidden` on Desktop) where all 5 pulled cards sit side-by-side in a 5-column stage without vertical scrolling.
-- **Confirmed Decision 2 — Full Immersive 5v5 Battle Package**:
-  - **3D Card Lunge & Clash Physics**: Attacking cards physically lunge across the stage toward their target slot with impact recoil and hit-stop flashes.
-  - **Elemental Projectile Beams**: Animated elemental attacks (*Water Wave*, *Volt Lightning*, *Fire Blaze*, *Starlight Prism*) travel from the attacker card to the target card before damage pops.
-  - **Interactive Lightstick Fan-Chant Boost**: A live interactive button (`Space` or Click) lets producers cheer during battle to boost the Hype Gauge, spawn stage lightstick particles, and grant a live **+15% ATK Fan-Chant Aura** to their unit.
-- **Confirmed Decision 3 — Idol Agency Schedule (Ekspedisi Kartu Cadangan)**:
-  - Spare photocards not currently in the 5v5 Stage Unit can be dispatched to 3 daily Agency Schedules (*Variety Show*, *Brand Ambassador Shoot*, and *Music Show Special*) to harvest **Star Diamonds (`💎`)**, **Star Coins (`🪙`)**, and **Bond XP**.
+- **Confirmed Decision 1 — Universal Dynamic Rarity (Common s/d EXOTIC) Murni dari Gacha & Wonder Pick**:
+  - Setiap idol (misal *Yujin IVE*, *Wonbin RIIZE*, hingga member *rookie* mana pun) tidak lagi terkunci pada satu *rarity* permanen. Saat membuka **Pack 3D** atau memilih di **Wonder Pick**, setiap idol dapat keluar dalam versi **Common, Rare, Epic, Legendary, Mythic, hingga 🌈 EXOTIC**!
+  - Tidak ada fitur *upgrade rarity* manual — kebanggaan memiliki kartu **Mythic** atau **EXOTIC** murni berasal dari keberuntungan *pull* Gacha, *Pity Counter*, dan *Wonder Pick*.
+- **Confirmed Decision 2 — 1 Slot per Idol di Binder + 6 Ikon Permata Varian (`C · R · E · L · M · EX`)**:
+  - Agar Binder tetap cepat dan tidak membengkak menjadi 1.536 kartu (`256 × 6`), setiap idol tetap menempati **1 slot utama** yang otomatis menggunakan **Tier Rarity Tertinggi** yang pernah ditarik pemain (beserta *stat multiplier* dari *rarity* tertinggi tersebut).
+  - Setiap kartu menampilkan **6 Permata Varian Rarity (`C · R · E · L · M · EX`)** yang menyala sesuai varian *rarity* mana saja yang sudah pernah berhasil ditarik untuk idol tersebut.
+- **Confirmed Decision 3 — Tier Baru `EXOTIC (Rainbow Hyper EX)` di Pack 3D, Binder, Wonder Pick & Starter Draft**:
+  - Menambahkan **Filter `🌈 Exotic`** di Binder, peluang kemunculan kartu **Exotic** di meja *Wonder Pick*, **Exotic Pity Counter** & efek **Prismatic Rainbow Foil** di *Pack 3D*, serta **kejutan peluang Jackpot kartu Exotic** di antara 5 pilihan kartu saat *Producer Debut Draft* (*New Game / Reset Data*).
+- **Confirmed Decision 4 — Redesign Beranda (`HomeView`) ala Pokémon TCG Pocket**:
+  - Merombak tampilan halaman **Beranda** agar satu bahasa visual dengan *Binder* dan *Studio Inspector* baru, menampilkan *Center Bias Showcase* dengan 6 permata varian *rarity*, penghitung koleksi kartu *Exotic*, *Daily Idol Fan-Chat* yang lebih bersih, dan pratinjau cepat *5v5 Stage Unit*.
 
 ---
 
 ## 1. Overview & Core Concept
 
-- **What It Does**:
-  1. **Zero-Scroll Single-Viewport Desktop Experience**: Players no longer have to scroll down past stacked sections just to click "Play" in Queendom Tower or view their Binder cards. Each sub-section occupies a dedicated, balanced 1-screen frame.
-  2. **5-Column Full-Width Card Grids**: Both the Binder, the 5v5 Stage Unit, the Queendom Rival Preview, and the Pack 3D Reveal Stage use a unified 5-card horizontal grid (`max-w-7xl`) that eliminates dead space on the right side of the container.
-  3. **High-Impact 5v5 Stage Battle**: Transforms the battle arena from static card slots into a kinetic K-Pop concert showdown with physical card lunges, elemental beam projectiles, dynamic camera zoom, and interactive Lightstick cheering.
-  4. **Idol Agency Schedule**: Gives every collected card in the player's Binder real economic value by letting bench idols complete agency schedules for Star Diamonds (`💎`) and Star Coins (`🪙`).
+- **What It Does**: Menghapus ketimpangan *rarity* antar member K-Pop sehingga setiap *idol* favorit pemain memiliki versi **Common** hingga **🌈 EXOTIC (Rainbow Hyper EX)** yang dapat diburu di *Pack 3D* dan *Wonder Pick*.
+- **Target Audience / Persona**: Kolektor *photocard* K-Pop dan penggemar *Pokémon TCG Pocket* yang menyukai sensasi berburu varian *rarity* tertinggi (*Rainbow Exotic*) untuk *bias* favorit mereka.
+- **Key Value**:
+  - **100% Fair for Every Bias**: Semua 256 *idol* bisa mencapai kasta **Exotic** dengan bingkai *Full-Art Rainbow EX* dan stat tertinggi apabila pemain berhasil menarik varian *Exotic*-nya.
+  - **Deep Collector Replayability**: Bahkan setelah memiliki seorang *idol* di versi *Common* atau *Rare*, menarik *idol* yang sama dalam versi *Legendary*, *Mythic*, atau *Exotic* akan langsung menaikkan kasta bingkai & kekuatan kartu tersebut (`⬆️ TIER UP!`) sekaligus menyalakan permata varian koleksinya.
 
 ---
 
 ## 2. User Experience & Visual Design
 
-- **Single-Viewport Spatial Math (`1440×900` Desktop Baseline)**:
-  - **Top HUD**: `52px` height (`top-2.5`).
-  - **Active Single-Viewport Stage**: `calc(100dvh - 136px)` (`pt-16 pb-20`), using `max-w-7xl` (`1280px` width) so 5 cards of width `208px` (`5 × 208px = 1040px` + `4 × 16px gaps = 64px` = `1104px`) fit with exact symmetrical padding inside the panel and **zero right-side gap**.
-  - **Bottom Navigation Dock**: `60px` height (`bottom-2.5`).
-- **Binder Sub-Section Switcher**:
-  - Top bar inside the Binder screen features a 3-way segmented control:
-    1. **📚 Koleksi 3D Binder (256 Kartu)** — Full-width 5-column grid (`grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 justify-items-center`) with instant search, Rarity/Era filters, and clean page navigation (`Halaman 1 / N` · 10 kartu per halaman) so cards never overflow awkwardly.
-    2. **⚔️ Formasi 5v5 Stage Unit** — Full-frame showcase of the 5 active Stage Unit cards in a single row, Center Bias Bond meter, active Synergy breakdown, and one-click **"Susun Unit Terkuat Otomatis"**.
-    3. **📅 Jadwal Agensi (Farm 💎 & 🪙)** — Interactive dispatch board where bench idols are assigned to 3 agency schedules to claim daily Star Diamonds and Coins.
-- **Queendom Survival Tower Single-Frame Layout**:
-  - **Left Panel (4 Columns)**: Compact 10-Floor Ladder (`2×5` grid) where all 10 floors fit cleanly in a single view without scrolling.
-  - **Right Panel (8 Columns)**:
-    - **Top Action Header**: Displays Floor Title, Elemental Role Buff (`+25% ATK`), Power comparison (`Power Kamu vs Lawan`), and the primary **"⚔️ Tantang Lantai Sekarang"** CTA button right at the top right so you can launch battles immediately.
-    - **Center 5-in-a-Row Rival Formation**: All 5 enemy cards sit side-by-side in a single row (`grid-cols-5 gap-3 justify-items-center`), completely eliminating the 3+2 row wrap from the previous layout.
+### Key User Flows
+1. **Gacha Pack 3D & Tier Upgrade Otomatis (`Common -> ... -> 🌈 EXOTIC`)**:
+   - Saat menyobek kemasan di **Pack 3D**, setiap kartu yang keluar memiliki kombinasi `(Idol, RolledRarity)` di mana `RolledRarity` berkisar dari `0 (Common)` hingga `5 (Exotic)`.
+   - Jika pemain sebelumnya memiliki *Yujin* versi `Rare (1)` lalu menarik *Yujin* versi `Exotic (5)`, kartu *Yujin* milik pemain otomatis ter-upgrade ke bingkai **`🌈 EXOTIC EX`** dengan label kejutan **`⬆️ NAIK KASTA KE EXOTIC!`** di panggung *reveal*, dan permata varian ke-6 menyala permanen.
+2. **6 Ikon Permata Varian Rarity (`C · R · E · L · M · EX`)**:
+   - Pada setiap kartu yang dimiliki di **Binder**, **Formasi**, dan **Detail Kartu**, terdapat barisan 6 berlian kecil (`Slate`, `Sky`, `Purple`, `Amber`, `Rose`, `Rainbow Cyan-Pink`). Berlian yang sudah pernah ditarik untuk idol tersebut akan menyala terang.
+3. **Producer Debut Draft dengan Kejutan Jackpot EXOTIC**:
+   - Saat *New Game* atau *Reset Data*, 5 kartu tertutup yang diacak minimal berstatus **Mythic (`CROWN EX`)**, dengan **1 slot kejutan Jackpot** yang berpeluang berstatus **`🌈 EXOTIC (RAINBOW EX)`**!
+4. **Redesign Beranda (`HomeView`)**:
+   - **Panel Kiri (Center Bias Pedestal)**: Menampilkan kartu *Center Bias* 3D dalam kasta *rarity* tertingginya, lengkap dengan indikator **6 Permata Varian Rarity**, *Affinity Bond Bar*, dan tombol klaim harian.
+   - **Panel Kanan Atas (Bento Stat & Exotic Tracker + Daily Fan-Chat)**: Menampilkan ringkasan koleksi **Exotic & Mythic**, pintasan *Pack 3D*, serta pesan interaktif *Daily Idol Fan-Chat*.
+   - **Panel Bawah (5v5 Stage Unit Lineup & Quick Tour Launch)**: Menampilkan ke-5 kartu unit aktif secara tajam (*crisp HD*) beserta tombol langsung menuju *World Tour* & *Queendom Tower*.
+
+### Visual Identity & Theme
+- **Tier 5: `EXOTIC (Rainbow Hyper EX)` Aesthetic**:
+  - **Outer Border**: Bingkai prismatik pelangi (`border-[#67E8F9]` dengan *multi-color glow* `shadow-[0_0_28px_rgba(56,189,248,0.65),0_0_45px_rgba(255,79,163,0.45)]`).
+  - **Foil Shader**: Gradien pelangi kosmik 6 warna (`#38BDF8 -> #A855F7 -> #FF4FA3 -> #FBBF24 -> #34D399 -> #38BDF8`) dengan lencana kepala **`🌈 EXOTIC EX`**.
+- **6-Gem Rarity Variant Strip**:
+  - 6 berlian mikro (`◆`) dengan kode warna tiap kasta (`Common` Abu-abu, `Rare` Biru, `Epic` Ungu, `Legendary` Emas, `Mythic` Pink, `Exotic` Pelangi Cyan-Emas).
 
 ---
 
 ## 3. Key Product Decisions & Trade-Offs
 
-- **Decision 1: Section Sub-Tabs & Paginated 5-Column Grid vs. Long Vertical Scroll**
-  - *Chosen Approach*: Dedicated sub-section switcher (`Koleksi Binder` | `Formasi 5v5 Unit` | `Jadwal Agensi`) with a 5-column grid.
-  - *Why*: Eliminates both the empty space on the right of the 4-card flex wrap and the tedious vertical scrolling between the Stage Unit and the Binder.
-- **Decision 2: Compositor-Smooth Battle Lunges & Elemental SVG Beams**
-  - *Chosen Approach*: Track active attacker/target coordinates and render GPU-accelerated lunge transforms (`translate3d` + `scale`) paired with an SVG elemental beam overlay (`Water`, `Volt`, `Fire`, `Prism`) and an interactive **Lightstick Fan-Chant Boost** button.
-  - *Why*: Delivers immediate visual impact and player agency during 5v5 battles while maintaining 60fps performance.
-- **Decision 3: Instant-Assign Idol Agency Schedule**
-  - *Chosen Approach*: 3 daily agency schedules that automatically select eligible spare idols from the player's collection (excluding the 5 active battle unit members) or let the player click **"Utus Idol Cadangan & Klaim Hadiah"**.
-  - *Why*: Rewards collectors for owning a wide roster of idols and provides a steady, balanced source of **+31 Star Diamonds (`💎`)** and **+680 Star Coins (`🪙`)** per day for PSA Card Grading.
+- **Decision 1: Menyimpan `cardMaxRarity` & `cardUnlockedRarities` di `SaveState` Tanpa Mengubah ID 256 Idol**
+  - *Chosen Approach*: Mempertahankan 256 ID *idol* (`0..255`), lalu menambahkan peta `cardRarity: Record<number, RarityIndex>` (menyimpan *rarity* tertinggi yang sudah ditarik untuk tiap `cardId`, `0..5`) dan `cardRarityMask: Record<number, number>` (bitmask 6-bit `1 << rarity` yang mencatat varian `Common..Exotic` mana saja yang pernah ditarik untuk *idol* tersebut).
+  - *Why*: Menjaga kompatibilitas 100% dengan sistem *deck* 5v5, *PSA Grading*, dan *Infinite Scroll Binder* (tetap 256 slot rapi), sembari memungkinkan setiap *idol* memiliki varian *Common* hingga *Exotic* dengan *stat* yang dihitung dinamis berdasarkan *rarity* tertingginya.
+- **Decision 2: Kalkulasi Stat Dinamis Berdasarkan Rarity Aktif (`getEffectiveCardStats`)**
+  - *Chosen Approach*: Saat menghitung ATK, HP, dan Stage Power sebuah kartu (`getCardStats`), sistem menggunakan *effective rarity* kartu tersebut (`0: Common` hingga `5: Exotic`). Kartu *idol* yang sudah mencapai kasta **Exotic (5)** mendapatkan basis ATK/HP tertinggi (`+26%` di atas *Mythic*), berapa pun *base rarity* awal di tabel data.
+  - *Why*: Memastikan keadilan penuh (*every idol is viable*) — *idol* mana pun yang berhasil ditarik dalam varian **Exotic** benar-benar memiliki kekuatan setara kasta tertinggi di panggung *5v5 Battle*!
 
 ---
 
 ## 4. Technical Architecture & Data Strategy *(Technical Reference)*
 
+### Architecture & Component Diagram
+
 ```
-┌────────────────────────────────────────────────────────────────────────────┐
-│                     App.tsx (Single-Viewport Game Shell)                   │
-│  Top HUD (Lv · Coins 🪙 · Diamonds 💎 · Tickets 🎫 · Bias) + Bottom Dock   │
-└───────┬──────────────────────────┬─────────────────────────┬───────────────┘
-        │                          │                         │
-        ▼                          ▼                         ▼
-┌──────────────────────┐ ┌─────────────────────────┐ ┌───────────────────────┐
-│   PackRipView.tsx    │ │   BinderDeckView.tsx    │ │   WorldTourView.tsx   │
-│  Single-Viewport 3D  │ │ 3-Section Switcher:     │ │ Single-Viewport Frame │
-│  Pack Studio & 5-Col │ │ 1. 5-Col Paginated Grid │ │ Top-Right Play CTA +  │
-│  Theater Reveal      │ │ 2. 5v5 Unit Formation   │ │ 5-in-a-Row Rival Row  │
-│                      │ │ 3. Idol Agency Schedule │ │ (Zero Scroll to Play) │
-└──────────────────────┘ └─────────────────────────┘ └───────────┬───────────┘
-                                                                 │
-                                                                 ▼
-                                                     ┌───────────────────────┐
-                                                     │ BattleArenaModal.tsx  │
-                                                     │ • 3D Card Lunge/Clash │
-                                                     │ • Elemental Beam VFX  │
-                                                     │ • Lightstick Boost    │
-                                                     └───────────────────────┘
+┌───────────────────────────────────────────────────────────────────────────┐
+│                   Dynamic 6-Tier Rarity Engine (0..5)                     │
+│  0: Common | 1: Rare | 2: Epic | 3: Legendary | 4: Mythic | 5: 🌈 EXOTIC  │
+│  • SaveState.cardRarity[cardId] -> Highest pulled rarity (0..5)           │
+│  • SaveState.cardRarityMask[cardId] -> 6-bit mask of unlocked tiers       │
+│  • SaveState.pityExotic -> Hard Pity counter for 🌈 EXOTIC (250 pulls)    │
+└───────────────┬───────────────────────────────────────────┬───────────────┘
+                │                                           │
+                ▼                                           ▼
+┌───────────────────────────────────────┐   ┌───────────────────────────────┐
+│   Gacha, Wonder Pick & Starter Draft  │   │   Photocard3D & Binder Views  │
+│  • PackRipView: Rolls any idol at     │   │  • Renders frame & stats using│
+│    rolled rarity (0..5) + Exotic Pity │   │    effectiveRarity (0..5)     │
+│  • WonderPickView: Can spawn 🌈 Exotic│   │  • 6-Gem Variant Strip shows  │
+│  • StarterMythicDraftModal: 5 cards   │   │    unlocked C·R·E·L·M·EX tiers│
+│    (Mythic + Jackpot Exotic chance!)  │   │  • Binder 6-Rarity Filter     │
+└───────────────────────────────────────┘   └───────────────────────────────┘
 ```
 
-### Data Model & Pure Game Logic (`SaveState`)
-- **`agencyScheduleClaimed: Record<string, boolean>`**: Tracks which of the 3 daily Agency Schedules (`variety_show`, `brand_shoot`, `music_bank`) have been completed today (resets automatically on daily reset).
-- **`AGENCY_SCHEDULES`**:
-  - `variety_show`: Requires 2 spare owned cards · Rewards `+140 🪙`, `+6 💎`, `+20 Bond XP`.
-  - `brand_shoot`: Requires 2 spare owned cards (at least 1 Rare+) · Rewards `+220 🪙`, `+10 💎`, `+30 Bond XP`.
-  - `music_bank`: Requires 3 spare owned cards (at least 1 Epic+) · Rewards `+320 🪙`, `+15 💎`, `+45 Bond XP`.
-- **`executeAgencySchedule(state, scheduleId)`**: Pure function that validates spare card eligibility (cards owned in `inv` that are not currently needed or using bench idols), awards `coins`, `diamonds`, and `biasBondXp`, and marks the schedule completed for the day.
+### Data Model & State
+- **`RarityIndex = 0 | 1 | 2 | 3 | 4 | 5`**:
+  - `0`: Common (`56%`), `1`: Rare (`25%`), `2`: Epic (`12%`), `3`: Legendary (`4.8%`), `4`: Mythic (`1.7%`), `5`: **Exotic (`0.5%` + Hard Pity `250`)**.
+- **`PullOutcomeItem` Enhancement**:
+  - Menyertakan `pulledRarity: RarityIndex`, `previousMaxRarity: RarityIndex | null`, dan `isTierUpgrade: boolean` sehingga layar *Pack Reveal* dan *Wonder Pick* menampilkan kartu sesuai *rarity* yang baru saja ditarik serta lencana **`⬆️ TIER UP!`** bila menaikkan kasta kartu yang sudah ada di Binder.
+- **Migrasi SaveState Lama**:
+  - Jika pemain sudah memiliki kartu di `inv` sebelum pembaruan ini, `loadSaveState()` otomatis menginisialisasi `cardRarity[id]` dan `cardRarityMask[id]` agar tidak ada progres yang hilang.

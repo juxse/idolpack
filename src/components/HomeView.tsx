@@ -81,6 +81,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
     return saveState.deck.reduce((sum, cid) => {
       const c = ALL_CARDS[cid];
       if (!c) return sum;
+      const effRarity = saveState.cardRarity?.[cid] ?? c.rarity;
       return (
         sum +
         getCardStats(
@@ -88,11 +89,12 @@ export const HomeView: React.FC<HomeViewProps> = ({
           saveState.lv[cid] || 1,
           saveState.stars[cid] || 0,
           unitSynergyBonus,
-          saveState.cardGrades?.[cid] || 0
+          saveState.cardGrades?.[cid] || 0,
+          effRarity
         ).power
       );
     }, 0);
-  }, [saveState.deck, saveState.lv, saveState.stars, unitSynergyBonus, saveState.cardGrades]);
+  }, [saveState.deck, saveState.lv, saveState.stars, saveState.cardRarity, unitSynergyBonus, saveState.cardGrades]);
 
   const currentCity =
     WORLD_TOUR_CITIES[Math.min(WORLD_TOUR_CITIES.length - 1, Math.floor(saveState.prog / 5))];
@@ -140,6 +142,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
             <div className="relative z-10 my-1 flex items-center justify-center">
               <Photocard3D
                 card={centerBiasCard}
+                effectiveRarity={saveState.cardRarity?.[centerBiasCard.id] ?? centerBiasCard.rarity}
+                rarityMask={saveState.cardRarityMask?.[centerBiasCard.id]}
                 level={saveState.lv[centerBiasCard.id] || 1}
                 awakeningStars={saveState.stars[centerBiasCard.id] || 0}
                 gradeTier={saveState.cardGrades?.[centerBiasCard.id] || 0}
@@ -359,9 +363,11 @@ export const HomeView: React.FC<HomeViewProps> = ({
               </p>
             </div>
             <div className="mt-2.5 pt-2 border-t border-white/10 flex items-center justify-between text-xs font-mono text-zinc-300 tabular-nums">
-              <span>Pity L+: {saveState.pityLegend}/70</span>
-              <span className="text-[#38BDF8]">
-                {saveState.freePacks > 0 ? `Gratis ×${saveState.freePacks}` : '360 Koin / ×5'}
+              <span className="truncate pr-1 text-[11px]" title="Pity Legendary / Mythic / Exotic">
+                Pity: L{saveState.pityLegend}/70 · M{saveState.pityMythic}/180 · <strong className="text-cyan-300">EX{saveState.pityExotic || 0}/250</strong>
+              </span>
+              <span className="text-[#38BDF8] shrink-0 font-bold">
+                {saveState.freePacks > 0 ? `Gratis ×${saveState.freePacks}` : '360 🪙'}
               </span>
             </div>
           </button>
@@ -420,7 +426,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 5 Kartu Acak TCG
               </h3>
               <p className="text-xs text-zinc-400 mt-0.5 truncate">
-                Kuota Harian {Math.max(0, 3 - (saveState.wonderPickDailyCount || 0))}/3 · Mythic 12%
+                Kuota {Math.max(0, 3 - (saveState.wonderPickDailyCount || 0))}/3 · Peluang 🌈 EXOTIC 8%
               </p>
             </div>
             <div className="mt-2.5 pt-2 border-t border-white/10 flex items-center justify-between text-xs font-mono tabular-nums">

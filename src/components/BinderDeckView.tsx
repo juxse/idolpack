@@ -1,8 +1,9 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Award,
   Calendar,
   CheckCircle2,
+  ChevronDown,
   Gem,
   Heart,
   Layers,
@@ -18,11 +19,11 @@ import {
   AGENCY_SCHEDULES,
   calculateUnitSynergy,
   getBiasBondInfo,
-  getCardGradeInfo,
   getCardStats,
   getEligibleAgencyCards,
 } from '../game/rules';
 import type { AgencyScheduleDef, SaveState } from '../game/rules';
+import { prefetchIdolBatch } from '../utils/imageResolver';
 import { Photocard3D } from './Photocard3D';
 
 interface BinderDeckViewProps {
@@ -34,8 +35,10 @@ interface BinderDeckViewProps {
   onDispatchAgencySchedule: (scheduleId: AgencyScheduleDef['id']) => void;
 }
 
-type BinderSubSection = 'binder' | 'formation' | 'agency';
+type BinderSubSection = 'formation' | 'binder' | 'agency';
 type BinderSortMode = 'power' | 'rarity' | 'grade' | 'group';
+
+const BINDER_BATCH_SIZE = 25;
 
 const ERA_FILTERS: Array<{ id: 'GEN3' | 'GEN4' | 'GEN5'; label: string }> = [
   { id: 'GEN3', label: 'Gen 3' },
@@ -51,13 +54,18 @@ export const BinderDeckView: React.FC<BinderDeckViewProps> = ({
   onOpenGroupDex,
   onDispatchAgencySchedule,
 }) => {
-  const [subSection, setSubSection] = useState<BinderSubSection>('binder');
+  // Default sub-tab is NOW 'formation' (Formasi 5v5 Stage Unit first, then Koleksi 3D Binder)
+  const [subSection, setSubSection] = useState<BinderSubSection>('formation');
   const [searchQuery, setSearchQuery] = useState('');
   const [eraFilter, setEraFilter] = useState<'GEN3' | 'GEN4' | 'GEN5' | null>(null);
   const [rarityFilter, setRarityFilter] = useState<number | null>(null);
   const [ownedOnly, setOwnedOnly] = useState(false);
   const [specialFilter, setSpecialFilter] = useState<'all' | 'unit' | 'graded'>('all');
   const [sortBy, setSortBy] = useState<BinderSortMode>('power');
+  const [visibleCount, setVisibleCount] = useState<number>(BINDER_BATCH_SIZE);
+
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
 
   const deckCards = useMemo(
     () => saveState.deck.map((id) => ALL_CARDS[id]).filter(Boolean),
@@ -74,9 +82,10 @@ export const BinderDeckView: React.FC<BinderDeckViewProps> = ({
       const lv = saveState.lv[c.id] || 1;
       const st = saveState.stars[c.id] || 0;
       const grade = saveState.cardGrades?.[c.id] || 0;
-      return sum + getCardStats(c, lv, st, synergy.totalBonus, grade).power;
+      const effRarity = saveState.cardRarity?.[c.id] ?? c.rarity;
+      return sum + getCardStats(c, lv, st, synergy.totalBonus, grade, effRarity).power;
     }, 0);
-  }, [deckCards, saveState.lv, saveState.stars, saveState.cardGrades, synergy.totalBonus]);
+  }, [deckCards, saveState.lv, saveState.stars, saveState.cardGrades, saveState.cardRarity, synergy.totalBonus]);
 
   const uniqueOwnedCount = useMemo(
     () => Object.keys(saveState.inv).filter((k) => saveState.inv[Number(k)] > 0).length,
@@ -89,15 +98,45 @@ export const BinderDeckView: React.FC<BinderDeckViewProps> = ({
     [saveState.cardGrades]
   );
 
+  // Owned reserve cards (not currently in the 5v5 deck) for quick swapping inside Formation tab
+  const ownedBenchCards = useMemo(() => {
+    const list = ALL_CARDS.filter(
+      (c) => (saveState.inv[c.id] || 0) > 0 && !saveState.deck.includes(c.id)
+    );
+    list.sort((a, b) => {
+      const effA = saveState.cardRarity?.[a.id] ?? a.rarity;
+      const effB = saveState.cardRarity?.[b.id] ?? b.rarity;
+      const pwrA = getCardStats(
+        a,
+        saveState.lv[a.id] || 1,
+        saveState.stars[a.id] || 0,
+        synergy.totalBonus,
+        saveState.cardGrades?.[a.id] || 0,
+        effA
+      ).power;
+      const pwrB = getCardStats(
+        b,
+        saveState.lv[b.id] || 1,
+        saveState.stars[b.id] || 0,
+        synergy.totalBonus,
+        saveState.cardGrades?.[b.id] || 0,
+        effB
+      ).power;
+      return pwrB - pwrA || effB - effA;
+    });
+    return list;
+  }, [saveState.inv, saveState.deck, saveState.lv, saveState.stars, saveState.cardGrades, saveState.cardRarity, synergy.totalBonus]);
+
   const filteredCards = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     const list = ALL_CARDS.filter((c) => {
       const copies = saveState.inv[c.id] || 0;
+      const effRarity = saveState.cardRarity?.[c.id] ?? c.rarity;
       if (ownedOnly && copies <= 0) return false;
       if (specialFilter === 'unit' && !saveState.deck.includes(c.id)) return false;
       if (specialFilter === 'graded' && !(saveState.cardGrades?.[c.id] > 0)) return false;
       if (eraFilter !== null && c.era !== eraFilter) return false;
-      if (rarityFilter !== null && c.rarity !== rarityFilter) return false;
+      if (rarityFilter !== null && effRarity !== rarityFilter) return false;
       if (q && !c.name.toLowerCase().includes(q) && !c.group.toLowerCase().includes(q)) {
         return false;
       }
@@ -109,21 +148,23 @@ export const BinderDeckView: React.FC<BinderDeckViewProps> = ({
       const ownB = (saveState.inv[b.id] || 0) > 0 ? 1 : 0;
       if (ownA !== ownB) return ownB - ownA;
 
+      const effA = saveState.cardRarity?.[a.id] ?? a.rarity;
+      const effB = saveState.cardRarity?.[b.id] ?? b.rarity;
       const gradeA = saveState.cardGrades?.[a.id] || 0;
       const gradeB = saveState.cardGrades?.[b.id] || 0;
       const lvA = saveState.lv[a.id] || 1;
       const lvB = saveState.lv[b.id] || 1;
       const stA = saveState.stars[a.id] || 0;
       const stB = saveState.stars[b.id] || 0;
-      const pwrA = getCardStats(a, lvA, stA, synergy.totalBonus, gradeA).power;
-      const pwrB = getCardStats(b, lvB, stB, synergy.totalBonus, gradeB).power;
+      const pwrA = getCardStats(a, lvA, stA, synergy.totalBonus, gradeA, effA).power;
+      const pwrB = getCardStats(b, lvB, stB, synergy.totalBonus, gradeB, effB).power;
 
       if (sortBy === 'power' && pwrA !== pwrB) return pwrB - pwrA;
       if (sortBy === 'grade' && gradeA !== gradeB) return gradeB - gradeA;
-      if (sortBy === 'rarity' && a.rarity !== b.rarity) return b.rarity - a.rarity;
+      if (sortBy === 'rarity' && effA !== effB) return effB - effA;
       if (sortBy === 'group' && a.group !== b.group) return a.group.localeCompare(b.group);
 
-      if (b.rarity !== a.rarity) return b.rarity - a.rarity;
+      if (effB !== effA) return effB - effA;
       if (pwrB !== pwrA) return pwrB - pwrA;
       return a.id - b.id;
     });
@@ -135,6 +176,7 @@ export const BinderDeckView: React.FC<BinderDeckViewProps> = ({
     saveState.stars,
     saveState.deck,
     saveState.cardGrades,
+    saveState.cardRarity,
     synergy.totalBonus,
     searchQuery,
     eraFilter,
@@ -143,6 +185,52 @@ export const BinderDeckView: React.FC<BinderDeckViewProps> = ({
     specialFilter,
     sortBy,
   ]);
+
+  // Reset Infinite Scroll batch to 25 whenever filter/sort changes or when switching to Binder tab
+  useEffect(() => {
+    setVisibleCount(BINDER_BATCH_SIZE);
+  }, [searchQuery, eraFilter, rarityFilter, ownedOnly, specialFilter, sortBy, subSection]);
+
+  const visibleBinderCards = useMemo(
+    () => filteredCards.slice(0, visibleCount),
+    [filteredCards, visibleCount]
+  );
+
+  // Prefetch only the newly visible batch of cards in Binder
+  useEffect(() => {
+    if (subSection !== 'binder') return;
+    const latestSlice = visibleBinderCards.slice(
+      Math.max(0, visibleBinderCards.length - BINDER_BATCH_SIZE)
+    );
+    if (latestSlice.length > 0) {
+      prefetchIdolBatch(latestSlice);
+    }
+  }, [subSection, visibleBinderCards]);
+
+  // IntersectionObserver for smooth 25-card Infinite Scroll in Koleksi 3D Binder
+  useEffect(() => {
+    if (subSection !== 'binder') return;
+    const sentinel = loadMoreSentinelRef.current;
+    if (!sentinel) return;
+    if (visibleCount >= filteredCards.length) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setVisibleCount((prev) =>
+            Math.min(filteredCards.length, prev + BINDER_BATCH_SIZE)
+          );
+        }
+      },
+      {
+        root: scrollContainerRef.current,
+        rootMargin: '260px',
+      }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [subSection, visibleCount, filteredCards.length]);
 
   const biasCard: IdolCard | null =
     saveState.biasCardId !== null && saveState.biasCardId !== undefined
@@ -161,12 +249,38 @@ export const BinderDeckView: React.FC<BinderDeckViewProps> = ({
   const collectionPct = Math.round((uniqueOwnedCount / ALL_CARDS.length) * 100);
 
   return (
-    <div className="fixed inset-0 z-10 pointer-events-auto pt-16 pb-24 px-3 sm:px-6 overflow-y-auto select-none">
+    <div
+      ref={scrollContainerRef}
+      className="fixed inset-0 z-10 pointer-events-auto pt-16 pb-24 px-3 sm:px-6 overflow-y-auto select-none"
+    >
       <div className="w-full max-w-[1380px] mx-auto flex flex-col gap-3.5">
-        {/* Top Studio Sub-Section Switcher Bar */}
-        <div className="rounded-2xl bg-[#0D1224]/92 border border-white/15 px-4 py-2.5 shadow-2xl flex flex-wrap items-center justify-between gap-3">
+        {/* Top Studio Sub-Section Switcher Bar (Formasi 5v5 FIRST, then Koleksi 3D Binder, then Jadwal Agensi) */}
+        <div className="rounded-2xl bg-[#0D1326]/95 border border-white/15 px-4 py-2.5 shadow-2xl flex flex-wrap items-center justify-between gap-3">
           {/* 3-Tab Segmented Control */}
-          <div className="flex flex-wrap items-center gap-1.5 bg-black/50 p-1 rounded-xl border border-white/10">
+          <div className="flex flex-wrap items-center gap-1.5 bg-[#070A14] p-1 rounded-xl border border-white/10">
+            <button
+              type="button"
+              data-testid="binder-subtab-formation"
+              onClick={() => setSubSection('formation')}
+              className={`min-h-[40px] px-4 py-1.5 rounded-lg font-display font-bold text-xs sm:text-sm flex items-center gap-2 transition-all cursor-pointer ${
+                subSection === 'formation'
+                  ? 'bg-sky-400 text-slate-950 shadow-[0_0_18px_rgba(56,189,248,0.45)]'
+                  : 'text-slate-300 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Swords className="w-4 h-4" />
+              <span>Formasi 5v5 Stage Unit</span>
+              <span
+                className={`px-2 py-0.5 rounded-md text-[11px] font-mono font-bold tabular-nums ${
+                  subSection === 'formation'
+                    ? 'bg-slate-950/85 text-amber-300'
+                    : 'bg-black/45 text-amber-300'
+                }`}
+              >
+                {saveState.deck.length}/5 · {totalPower.toLocaleString()} PWR
+              </span>
+            </button>
+
             <button
               type="button"
               data-testid="binder-subtab-binder"
@@ -181,23 +295,6 @@ export const BinderDeckView: React.FC<BinderDeckViewProps> = ({
               <span>Koleksi 3D Binder</span>
               <span className="px-2 py-0.5 rounded-md bg-black/35 text-[11px] font-mono font-bold tabular-nums">
                 {uniqueOwnedCount}/{ALL_CARDS.length}
-              </span>
-            </button>
-
-            <button
-              type="button"
-              data-testid="binder-subtab-formation"
-              onClick={() => setSubSection('formation')}
-              className={`min-h-[40px] px-4 py-1.5 rounded-lg font-display font-bold text-xs sm:text-sm flex items-center gap-2 transition-all cursor-pointer ${
-                subSection === 'formation'
-                  ? 'bg-sky-400 text-slate-950 shadow-[0_0_18px_rgba(56,189,248,0.45)]'
-                  : 'text-slate-300 hover:text-white hover:bg-white/5'
-              }`}
-            >
-              <Swords className="w-4 h-4" />
-              <span>Formasi 5v5 Stage Unit</span>
-              <span className="px-2 py-0.5 rounded-md bg-black/35 text-[11px] font-mono text-amber-300 font-bold tabular-nums">
-                {saveState.deck.length}/5 · {totalPower.toLocaleString()} PWR
               </span>
             </button>
 
@@ -242,14 +339,228 @@ export const BinderDeckView: React.FC<BinderDeckViewProps> = ({
           </div>
         </div>
 
-        {/* SUB-SECTION 1: TRUE SCROLLING 5-COLUMN COLLECTOR'S BINDER */}
+        {/* SUB-SECTION 1 (DEFAULT): 5V5 STAGE UNIT FORMATION (CRISP HD PHOTOS + QUICK BENCH PICKER) */}
+        {subSection === 'formation' && (
+          <section
+            data-testid="binder-section-formation"
+            className="rounded-3xl bg-[#0D1326]/95 border border-white/15 p-4 sm:p-5 shadow-2xl flex flex-col gap-4"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/12 pb-3">
+              <div>
+                <div className="text-xs font-sans font-bold uppercase tracking-wider text-sky-400">
+                  Formasi Konser Utama · 5 Slot Aktif (Crisp HD Studio)
+                </div>
+                <h2 className="text-xl sm:text-2xl font-display font-extrabold text-white mt-0.5">
+                  5v5 Stage Unit ({saveState.deck.length}/5 Member)
+                </h2>
+                <p className="text-xs font-sans text-slate-300 mt-0.5">
+                  Klik photocard untuk Level Up, Full-Screen Clean Art Preview, Polco Deco, atau sertifikasi PSA 10 Black Label.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setSubSection('binder')}
+                  className="min-h-[42px] px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-xs font-display font-bold text-white flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Layers className="w-3.5 h-3.5 text-sky-300" />
+                  <span>Buka Semua Koleksi ({uniqueOwnedCount}/{ALL_CARDS.length})</span>
+                </button>
+                <div className="px-4 py-1.5 rounded-2xl bg-[#070A14] border border-amber-400/35 text-right">
+                  <div className="text-[10px] font-sans font-semibold text-slate-400">
+                    Total Stage Power Unit
+                  </div>
+                  <div className="text-lg sm:text-xl font-mono font-extrabold text-amber-300 tabular-nums">
+                    PWR {totalPower.toLocaleString()}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 5-Column Full-Width Stage Unit Cards (Rendered at crisp 1:1 native pixel resolution) */}
+            <div
+              data-testid="formation-5col-grid"
+              className="w-full grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5 sm:gap-4 justify-items-center py-1"
+            >
+              {Array.from({ length: 5 }).map((_, slotIdx) => {
+                const cardId = saveState.deck[slotIdx];
+                const card = cardId !== undefined ? ALL_CARDS[cardId] : null;
+                if (!card) {
+                  return (
+                    <button
+                      key={`empty-${slotIdx}`}
+                      type="button"
+                      onClick={() => setSubSection('binder')}
+                      className="w-full min-h-[340px] sm:min-h-[378px] rounded-2xl border-2 border-dashed border-white/20 hover:border-sky-400/60 bg-white/[0.03] hover:bg-sky-500/[0.06] flex flex-col items-center justify-center p-4 text-center transition-all cursor-pointer"
+                    >
+                      <div className="w-11 h-11 rounded-2xl bg-sky-400/15 border border-sky-400/35 flex items-center justify-center text-sky-300 text-2xl font-display font-bold mb-2">
+                        +
+                      </div>
+                      <span className="text-sm font-display font-bold text-white">
+                        Slot Unit #{slotIdx + 1} Kosong
+                      </span>
+                      <span className="text-xs font-sans text-sky-300 mt-1">
+                        Pilih dari Cadangan atau Buka Koleksi Binder
+                      </span>
+                    </button>
+                  );
+                }
+
+                const lv = saveState.lv[card.id] || 1;
+                const st = saveState.stars[card.id] || 0;
+                const grade = saveState.cardGrades?.[card.id] || 0;
+                const effRarity = saveState.cardRarity?.[card.id] ?? card.rarity;
+                const cStats = getCardStats(card, lv, st, synergy.totalBonus, grade, effRarity);
+                const roleMeta = ROLES[card.role] || ROLES[0];
+                const copies = saveState.inv[card.id] || 1;
+
+                return (
+                  <div
+                    key={card.id}
+                    className="w-full flex flex-col items-center justify-between p-2.5 rounded-2xl bg-gradient-to-b from-[#161F3E] to-[#0B1022] border border-sky-400/35 shadow-[0_10px_28px_rgba(0,0,0,0.45)]"
+                  >
+                    {/* Crisp Top Sleeve Header */}
+                    <div className="w-full flex items-center justify-between gap-1 px-1 mb-1.5 text-[11px] font-mono tabular-nums">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="px-1.5 py-0.2 rounded bg-sky-400/20 text-sky-300 text-[10px] font-bold">
+                          SLOT #{slotIdx + 1}
+                        </span>
+                        <span className="text-[10px] font-sans font-semibold text-slate-200 truncate">
+                          {roleMeta.icon} {roleMeta.short}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span className="px-1.5 py-0.2 rounded bg-amber-400/15 border border-amber-400/35 text-[10px] text-amber-300 font-bold">
+                          PWR {cStats.power.toLocaleString()}
+                        </span>
+                        <span className="px-1.5 py-0.2 rounded bg-white/10 text-[10px] text-slate-200 font-bold">
+                          ×{copies}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* 1:1 Native Resolution Photocard3D (Zero scale blur!) */}
+                    <Photocard3D
+                      card={card}
+                      effectiveRarity={effRarity}
+                      rarityMask={saveState.cardRarityMask?.[card.id]}
+                      level={lv}
+                      awakeningStars={st}
+                      synergyBonus={synergy.totalBonus}
+                      size="md"
+                      inDeck
+                      isSelected={false}
+                      isBias={saveState.biasCardId === card.id}
+                      decoFrame={saveState.cardDeco?.[card.id]}
+                      gradeTier={grade}
+                      onClick={() => onInspectCard(card)}
+                    />
+
+                    {/* Bottom Slot Actions */}
+                    <div className="w-full mt-2.5 grid grid-cols-2 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => onInspectCard(card)}
+                        className="min-h-[32px] px-2.5 py-1 rounded-xl bg-sky-500/20 hover:bg-sky-500/30 border border-sky-400/40 text-[11px] font-display font-bold text-sky-200 cursor-pointer truncate"
+                      >
+                        💎 Detail / Up
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onToggleDeckCard(card.id)}
+                        className="min-h-[32px] px-2.5 py-1 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 border border-rose-400/35 text-[11px] font-display font-bold text-rose-300 cursor-pointer truncate"
+                      >
+                        Lepas Slot
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Active Synergy & Center Bias Bond Strip + Quick Reserve Bench */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 pt-2 border-t border-white/12">
+              <div className="lg:col-span-7 rounded-2xl bg-[#080C1A] border border-white/10 p-3.5 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-display font-bold text-slate-300">
+                    Sinergi Unit Aktif:
+                  </span>
+                  {synergy.activeBadges.length === 0 ? (
+                    <span className="text-xs font-sans text-slate-400">
+                      Pasang 2+ member grup sama atau 3+ role berbeda untuk bonus stat panggung!
+                    </span>
+                  ) : (
+                    synergy.activeBadges.map((s) => (
+                      <span
+                        key={s.label}
+                        className="px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-400/30 text-xs font-sans font-bold text-emerald-300"
+                      >
+                        ✨ {s.label} (+{s.bonusPct}% Stat)
+                      </span>
+                    ))
+                  )}
+                </div>
+
+                {ownedBenchCards.length > 0 && (
+                  <div className="w-full pt-2 mt-1 border-t border-white/10 flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[11px] font-sans text-slate-400">
+                      Kartu Cadangan Siap Pasang ({ownedBenchCards.length} Kartu):
+                    </span>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {ownedBenchCards.slice(0, 4).map((benchCard) => (
+                        <button
+                          key={benchCard.id}
+                          type="button"
+                          onClick={() => onToggleDeckCard(benchCard.id)}
+                          className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-sky-500/25 border border-white/15 hover:border-sky-400/50 text-xs font-display font-bold text-white flex items-center gap-1.5 transition-colors cursor-pointer"
+                        >
+                          <span>+ {benchCard.name}</span>
+                          <span className="text-[10px] font-mono text-amber-300">
+                            ({benchCard.group})
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {biasCard && (
+                <div className="lg:col-span-5 rounded-2xl bg-pink-500/10 border border-pink-400/30 p-3.5 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5 text-xs font-sans text-pink-200 font-bold">
+                    <Heart className="w-4 h-4 text-pink-400 fill-pink-400 shrink-0" />
+                    <div>
+                      <div>
+                        Center Bias: <span className="text-white">{biasCard.name}</span> (
+                        {biasCard.group})
+                      </div>
+                      <div className="text-[11px] font-mono text-pink-300">
+                        Bond Lv.{biasBond.level} (+{Math.round(biasBond.statBonus * 100)}% All-Stat)
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onInspectCard(biasCard)}
+                    className="px-3.5 py-2 rounded-xl bg-pink-500/25 hover:bg-pink-500/35 border border-pink-300/40 text-xs font-display font-bold text-white cursor-pointer shrink-0"
+                  >
+                    Kelola Bias
+                  </button>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* SUB-SECTION 2: INFINITE-SCROLL 5-COLUMN COLLECTOR'S BINDER (25 CARDS PER BATCH = ZERO LAG) */}
         {subSection === 'binder' && (
           <section
             data-testid="binder-section-collection"
-            className="rounded-3xl bg-[#0D1224]/92 border border-white/15 p-4 sm:p-5 shadow-2xl flex flex-col gap-4"
+            className="rounded-3xl bg-[#0D1326]/95 border border-white/15 p-4 sm:p-5 shadow-2xl flex flex-col gap-4"
           >
             {/* Binder Collector Overview Strip */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3.5 rounded-2xl bg-[#131A32]/90 border border-white/10">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3.5 rounded-2xl bg-[#131B36] border border-white/10">
               <div className="flex flex-col justify-center gap-1">
                 <div className="flex items-center justify-between text-xs font-sans">
                   <span className="text-slate-300 font-semibold">Kelengkapan Koleksi Binder</span>
@@ -286,449 +597,333 @@ export const BinderDeckView: React.FC<BinderDeckViewProps> = ({
                     ⚡ {totalPower.toLocaleString()} Stage Power
                   </div>
                 </div>
-                <Zap className="w-5 h-5 text-amber-400 shrink-0" />
+                <Zap className="w-5 h-5 text-amber-300 shrink-0" />
               </div>
             </div>
 
-            {/* Filter & Sorting Toolbar */}
-            <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 pb-3 border-b border-white/10">
-              {/* Search + Ownership / Category Filter Pills */}
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="relative w-60 sm:w-64">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            {/* Filter & Sort Controls Row */}
+            <div className="flex flex-col gap-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2.5">
+                {/* Search Input */}
+                <div className="relative flex-1 min-w-[210px] max-w-xs">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Cari idol atau grup (ILLIT, IVE, aespa)..."
-                    className="w-full min-h-[38px] pl-9 pr-3 py-1.5 rounded-xl bg-[#131A32] border border-white/15 text-xs font-sans text-white placeholder:text-slate-400 focus:outline-none focus:border-sky-400"
+                    className="w-full pl-9 pr-3 py-2 rounded-xl bg-[#070A14] border border-white/15 text-xs font-sans text-white placeholder:text-slate-400 focus:outline-none focus:border-[#FF4FA3]"
                   />
                 </div>
 
-                {/* Owned vs Full Binder Toggle */}
-                <div className="flex items-center gap-1 bg-black/45 p-1 rounded-xl border border-white/10">
-                  <button
-                    type="button"
-                    onClick={() => setOwnedOnly(false)}
-                    className={`px-3 py-1 rounded-lg text-xs font-sans font-bold transition-colors cursor-pointer ${
-                      !ownedOnly
-                        ? 'bg-[#FF4FA3] text-white'
-                        : 'text-slate-300 hover:text-white'
-                    }`}
-                  >
-                    Semua Slot ({ALL_CARDS.length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setOwnedOnly(true)}
-                    className={`px-3 py-1 rounded-lg text-xs font-sans font-bold transition-colors cursor-pointer ${
-                      ownedOnly
-                        ? 'bg-[#FF4FA3] text-white'
-                        : 'text-slate-300 hover:text-white'
-                    }`}
-                  >
-                    Milikku ({uniqueOwnedCount})
-                  </button>
+                {/* Ownership & Status Filter Pills */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <div className="flex items-center bg-[#070A14] p-1 rounded-xl border border-white/10 text-xs font-sans font-semibold">
+                    <button
+                      type="button"
+                      onClick={() => setOwnedOnly(false)}
+                      className={`px-3 py-1 rounded-lg transition-colors cursor-pointer ${
+                        !ownedOnly ? 'bg-[#FF4FA3] text-white' : 'text-slate-300 hover:text-white'
+                      }`}
+                    >
+                      Semua Slot ({ALL_CARDS.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOwnedOnly(true)}
+                      className={`px-3 py-1 rounded-lg transition-colors cursor-pointer ${
+                        ownedOnly ? 'bg-[#FF4FA3] text-white' : 'text-slate-300 hover:text-white'
+                      }`}
+                    >
+                      Milikku ({uniqueOwnedCount})
+                    </button>
+                  </div>
+
+                  <div className="flex items-center bg-[#070A14] p-1 rounded-xl border border-white/10 text-xs font-sans font-semibold">
+                    <button
+                      type="button"
+                      onClick={() => setSpecialFilter('all')}
+                      className={`px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${
+                        specialFilter === 'all'
+                          ? 'bg-white text-slate-950 font-bold'
+                          : 'text-slate-300 hover:text-white'
+                      }`}
+                    >
+                      Semua
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSpecialFilter('unit')}
+                      className={`px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${
+                        specialFilter === 'unit'
+                          ? 'bg-emerald-400 text-slate-950 font-bold'
+                          : 'text-slate-300 hover:text-white'
+                      }`}
+                    >
+                      Di Unit ({saveState.deck.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSpecialFilter('graded')}
+                      className={`px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${
+                        specialFilter === 'graded'
+                          ? 'bg-amber-400 text-slate-950 font-bold'
+                          : 'text-slate-300 hover:text-white'
+                      }`}
+                    >
+                      PSA Slab ({gradedCardsCount})
+                    </button>
+                  </div>
                 </div>
 
-                {/* Quick Category Filter: Semua / Di Unit / PSA Graded */}
-                <div className="flex items-center gap-1 bg-black/45 p-1 rounded-xl border border-white/10">
-                  <button
-                    type="button"
-                    onClick={() => setSpecialFilter('all')}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-sans font-semibold cursor-pointer ${
-                      specialFilter === 'all'
-                        ? 'bg-white text-slate-950 font-bold'
-                        : 'text-slate-300 hover:text-white'
-                    }`}
-                  >
-                    Semua
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSpecialFilter('unit')}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-sans font-semibold cursor-pointer ${
-                      specialFilter === 'unit'
-                        ? 'bg-emerald-400 text-slate-950 font-bold'
-                        : 'text-slate-300 hover:text-white'
-                    }`}
-                  >
-                    Di Unit ({saveState.deck.length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSpecialFilter('graded')}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-sans font-semibold cursor-pointer ${
-                      specialFilter === 'graded'
-                        ? 'bg-amber-400 text-slate-950 font-bold'
-                        : 'text-slate-300 hover:text-white'
-                    }`}
-                  >
-                    PSA Slab ({gradedCardsCount})
-                  </button>
+                {/* Rarity Filter Pills (0..5 including 🌈 EXOTIC) */}
+                <div className="flex flex-wrap items-center gap-1">
+                  {[0, 1, 2, 3, 4, 5].map((r) => {
+                    const isExotic = r === 5;
+                    const isSelectedRarity = rarityFilter === r;
+                    return (
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() => setRarityFilter((curr) => (curr === r ? null : r))}
+                        className={`px-2.5 py-1.5 rounded-xl text-xs font-sans font-bold border transition-colors cursor-pointer ${
+                          isSelectedRarity
+                            ? isExotic
+                              ? 'bg-gradient-to-r from-cyan-400 via-pink-400 to-amber-300 text-slate-950 border-white shadow-[0_0_12px_rgba(56,189,248,0.7)]'
+                              : 'bg-amber-400 text-slate-950 border-amber-300'
+                            : isExotic
+                            ? 'bg-[#070A14] text-cyan-300 border-cyan-400/40 hover:bg-cyan-500/15'
+                            : 'bg-[#070A14] text-slate-300 border-white/10 hover:bg-white/10'
+                        }`}
+                      >
+                        {isExotic ? '🌈 Exotic' : RARITY_LABELS[r]}
+                      </button>
+                    );
+                  })}
                 </div>
+              </div>
 
-                {/* Era Filter Buttons */}
-                <div className="flex items-center gap-1">
+              {/* Second Filter Row: Generation & Sort Selector */}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-1.5">
                   {ERA_FILTERS.map((era) => (
                     <button
                       key={era.id}
                       type="button"
-                      onClick={() => setEraFilter(eraFilter === era.id ? null : era.id)}
-                      className={`min-h-[34px] px-2.5 py-1 rounded-xl text-xs font-sans font-bold cursor-pointer border ${
+                      onClick={() =>
+                        setEraFilter((curr) => (curr === era.id ? null : era.id))
+                      }
+                      className={`px-3 py-1 rounded-xl text-xs font-sans font-bold border transition-colors cursor-pointer ${
                         eraFilter === era.id
-                          ? 'bg-purple-500 border-purple-300 text-white'
-                          : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'
+                          ? 'bg-sky-400 text-slate-950 border-sky-300'
+                          : 'bg-[#070A14] text-slate-300 border-white/10 hover:bg-white/10'
                       }`}
                     >
                       {era.label}
                     </button>
                   ))}
-                </div>
-              </div>
-
-              {/* Rarity Filter + Sort Order */}
-              <div className="flex flex-wrap items-center justify-between xl:justify-end gap-2">
-                <div className="flex flex-wrap items-center gap-1">
-                  {RARITY_LABELS.map((rName, rIdx) => (
-                    <button
-                      key={rName}
-                      type="button"
-                      onClick={() => setRarityFilter(rarityFilter === rIdx ? null : rIdx)}
-                      className={`min-h-[32px] px-2.5 py-1 rounded-xl text-xs font-sans font-bold cursor-pointer border ${
-                        rarityFilter === rIdx
-                          ? 'bg-sky-400 border-sky-200 text-slate-950'
-                          : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'
-                      }`}
-                    >
-                      {rName}
-                    </button>
-                  ))}
+                  <span className="text-xs font-mono text-slate-400 ml-2">
+                    Menampilkan {visibleBinderCards.length} dari {filteredCards.length} kartu
+                  </span>
                 </div>
 
-                {/* Sort Selector */}
-                <div className="flex items-center gap-1.5 bg-black/45 px-2.5 py-1 rounded-xl border border-white/10 text-xs font-sans">
+                <div className="flex items-center gap-1.5 bg-[#070A14] px-2.5 py-1 rounded-xl border border-white/10 text-xs font-sans">
                   <span className="text-slate-400 font-medium">Urutkan:</span>
-                  {(['power', 'rarity', 'grade', 'group'] as const).map((mode) => (
+                  {(
+                    [
+                      { id: 'power', label: 'Power' },
+                      { id: 'rarity', label: 'Rarity' },
+                      { id: 'grade', label: 'PSA' },
+                      { id: 'group', label: 'Grup' },
+                    ] as const
+                  ).map((opt) => (
                     <button
-                      key={mode}
+                      key={opt.id}
                       type="button"
-                      onClick={() => setSortBy(mode)}
-                      className={`px-2 py-0.5 rounded-lg font-bold cursor-pointer ${
-                        sortBy === mode
-                          ? 'bg-sky-500/25 text-sky-300 border border-sky-400/40'
+                      onClick={() => setSortBy(opt.id)}
+                      className={`px-2 py-0.5 rounded-lg font-bold transition-colors cursor-pointer ${
+                        sortBy === opt.id
+                          ? 'bg-sky-400/25 text-sky-300 border border-sky-400/40'
                           : 'text-slate-400 hover:text-white'
                       }`}
                     >
-                      {mode === 'power'
-                        ? 'Power'
-                        : mode === 'rarity'
-                        ? 'Rarity'
-                        : mode === 'grade'
-                        ? 'PSA'
-                        : 'Grup'}
+                      {opt.label}
                     </button>
                   ))}
                 </div>
               </div>
             </div>
 
-            {/* 5-Column Collector's Photocard Binder Sleeve Grid (Smooth Vertical Scrolling!) */}
+            {/* 5-Column Infinite-Scrolling Binder Pocket Grid (Mounts 25 cards per batch for 0ms lag!) */}
             {filteredCards.length === 0 ? (
-              <div className="py-16 text-center text-slate-300 font-sans text-sm space-y-2">
-                <div>Tidak ada photocard yang cocok dengan filter pencarianmu.</div>
+              <div className="py-12 rounded-2xl bg-black/35 border border-white/10 flex flex-col items-center justify-center text-center gap-3">
+                <p className="text-sm font-sans text-slate-300">
+                  Tidak ada photocard yang cocok dengan filter pencarianmu.
+                </p>
                 <button
                   type="button"
                   onClick={() => {
                     setSearchQuery('');
                     setEraFilter(null);
                     setRarityFilter(null);
-                    setSpecialFilter('all');
                     setOwnedOnly(false);
+                    setSpecialFilter('all');
                   }}
-                  className="px-4 py-2 rounded-xl bg-sky-500/20 border border-sky-400/40 text-xs font-bold text-sky-300 cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-display font-bold text-white cursor-pointer"
                 >
                   Reset Filter Binder
                 </button>
               </div>
             ) : (
-              <div
-                data-testid="binder-5col-grid"
-                className="w-full grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3.5 sm:gap-4 justify-items-center py-1"
-              >
-                {filteredCards.map((card) => {
-                  const copies = saveState.inv[card.id] || 0;
-                  const isOwned = copies > 0;
-                  const isInDeck = saveState.deck.includes(card.id);
-                  const lv = saveState.lv[card.id] || 1;
-                  const st = saveState.stars[card.id] || 0;
-                  const gradeTier = saveState.cardGrades?.[card.id] || 0;
-                  const cardStats = getCardStats(
-                    card,
-                    lv,
-                    st,
-                    synergy.totalBonus,
-                    gradeTier
-                  );
-                  const gradeInfo = getCardGradeInfo(gradeTier);
+              <>
+                <div
+                  data-testid="binder-5col-grid"
+                  className="w-full grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3.5 sm:gap-4 justify-items-center py-1"
+                >
+                  {visibleBinderCards.map((card) => {
+                    const copies = saveState.inv[card.id] || 0;
+                    const isOwned = copies > 0;
+                    const isInDeck = saveState.deck.includes(card.id);
+                    const lv = saveState.lv[card.id] || 1;
+                    const st = saveState.stars[card.id] || 0;
+                    const gradeTier = saveState.cardGrades?.[card.id] || 0;
+                    const effRarity = saveState.cardRarity?.[card.id] ?? card.rarity;
+                    const cardStats = getCardStats(
+                      card,
+                      lv,
+                      st,
+                      isInDeck ? synergy.totalBonus : 0,
+                      gradeTier,
+                      effRarity
+                    );
 
-                  return (
-                    <div
-                      key={card.id}
-                      className={`w-full flex flex-col items-center justify-between p-2.5 rounded-2xl border transition-all ${
-                        isOwned
-                          ? isInDeck
-                            ? 'bg-gradient-to-b from-emerald-950/35 via-[#131A32]/90 to-[#0C1021] border-emerald-400/45 shadow-[0_8px_24px_rgba(16,185,129,0.12)]'
-                            : 'bg-gradient-to-b from-[#161E3A]/85 to-[#0C1021]/90 border-white/12 hover:border-white/25 shadow-lg'
-                          : 'bg-black/35 border-white/5 opacity-60 hover:opacity-85'
-                      }`}
-                    >
-                      {/* Top Acrylic Sleeve Header (No duplicate PSA badge; explicit Role & PWR label) */}
-                      <div className="w-full flex items-center justify-between gap-1 px-1 mb-1.5 text-[11px] font-mono tabular-nums">
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <span className="text-slate-400 font-semibold">
-                            #{String(card.id + 1).padStart(3, '0')}
-                          </span>
-                          <span className="text-[10px] font-sans font-semibold text-slate-300 truncate">
-                            {ROLES[card.role]?.icon} {ROLES[card.role]?.short}
-                          </span>
-                        </div>
-                        {isOwned ? (
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <span
-                              title="Total Stage Power (ATK + HP + Bonus)"
-                              className="px-1.5 py-0.2 rounded bg-amber-400/15 border border-amber-400/30 text-[10px] text-amber-300 font-bold"
-                            >
-                              PWR {cardStats.power.toLocaleString()}
+                    return (
+                      <div
+                        key={card.id}
+                        className={`w-full flex flex-col items-center justify-between p-2.5 rounded-2xl border transition-colors ${
+                          isOwned
+                            ? isInDeck
+                              ? 'bg-gradient-to-b from-emerald-950/35 via-[#131A32] to-[#0C1021] border-emerald-400/45'
+                              : 'bg-gradient-to-b from-[#161E3A] to-[#0C1021] border-white/12 hover:border-white/25'
+                            : 'bg-black/35 border-white/5 opacity-60 hover:opacity-85'
+                        }`}
+                      >
+                        {/* Top Acrylic Sleeve Header */}
+                        <div className="w-full flex items-center justify-between gap-1 px-1 mb-1.5 text-[11px] font-mono tabular-nums">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-slate-400 font-semibold">
+                              #{String(card.id + 1).padStart(3, '0')}
                             </span>
-                            <span
-                              title="Jumlah Salinan Kartu"
-                              className="px-1.5 py-0.2 rounded bg-sky-400/15 border border-sky-400/30 text-[10px] text-sky-300 font-bold"
-                            >
-                              ×{copies}
+                            <span className="text-[10px] font-sans font-semibold text-slate-300 truncate">
+                              {ROLES[card.role]?.icon} {ROLES[card.role]?.short}
                             </span>
                           </div>
+                          {isOwned ? (
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span
+                                title="Total Stage Power (ATK + HP + Bonus)"
+                                className="px-1.5 py-0.2 rounded bg-amber-400/15 border border-amber-400/30 text-[10px] text-amber-300 font-bold"
+                              >
+                                PWR {cardStats.power.toLocaleString()}
+                              </span>
+                              <span
+                                title="Jumlah Salinan Kartu"
+                                className="px-1.5 py-0.2 rounded bg-sky-400/15 border border-sky-400/30 text-[10px] text-sky-300 font-bold"
+                              >
+                                ×{copies}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-[10px] font-sans text-slate-500 font-semibold">
+                              Belum Dimiliki
+                            </span>
+                          )}
+                        </div>
+
+                        {/* 3D Photocard inside Sleeve */}
+                        <div
+                          className={
+                            isOwned ? '' : 'grayscale contrast-75 opacity-65 pointer-events-none'
+                          }
+                        >
+                          <Photocard3D
+                            card={card}
+                            effectiveRarity={effRarity}
+                            rarityMask={saveState.cardRarityMask?.[card.id]}
+                            level={lv}
+                            awakeningStars={st}
+                            synergyBonus={isInDeck ? synergy.totalBonus : 0}
+                            inDeck={isInDeck}
+                            isSelected={isInDeck}
+                            isBias={saveState.biasCardId === card.id}
+                            decoFrame={saveState.cardDeco?.[card.id]}
+                            gradeTier={gradeTier}
+                            size="md"
+                            onClick={() => {
+                              if (isOwned) {
+                                onInspectCard(card);
+                              }
+                            }}
+                          />
+                        </div>
+
+                        {/* Bottom Pocket Action Buttons */}
+                        {isOwned ? (
+                          <div className="w-full mt-2.5 grid grid-cols-2 gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => onToggleDeckCard(card.id)}
+                              className={`min-h-[32px] px-2 py-1 rounded-xl text-[11px] font-display font-bold transition-colors cursor-pointer truncate ${
+                                isInDeck
+                                  ? 'bg-emerald-500/25 border border-emerald-400/50 text-emerald-300'
+                                  : 'bg-white/10 hover:bg-white/20 text-white border border-white/10'
+                              }`}
+                            >
+                              {isInDeck ? '✓ Di Unit' : '+ Unit'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => onInspectCard(card)}
+                              className="min-h-[32px] px-2 py-1 rounded-xl bg-amber-400/15 hover:bg-amber-400/25 border border-amber-400/35 text-[11px] font-display font-bold text-amber-300 cursor-pointer truncate"
+                            >
+                              💎 Detail
+                            </button>
+                          </div>
                         ) : (
-                          <span className="text-[10px] font-sans text-slate-500 font-semibold">
-                            Belum Dimiliki
-                          </span>
+                          <div className="w-full mt-2.5 py-1.5 rounded-xl bg-white/[0.03] border border-white/5 text-center text-[11px] font-sans text-slate-400">
+                            {card.group} · {RARITY_LABELS[card.rarity]}
+                          </div>
                         )}
                       </div>
-
-                      {/* 3D Photocard inside Sleeve */}
-                      <div
-                        className={
-                          isOwned ? '' : 'grayscale contrast-75 opacity-65 pointer-events-none'
-                        }
-                      >
-                        <Photocard3D
-                          card={card}
-                          level={lv}
-                          awakeningStars={st}
-                          synergyBonus={synergy.totalBonus}
-                          inDeck={isInDeck}
-                          isSelected={isInDeck}
-                          isBias={saveState.biasCardId === card.id}
-                          decoFrame={saveState.cardDeco?.[card.id]}
-                          gradeTier={gradeTier}
-                          size="md"
-                          onClick={() => {
-                            if (isOwned) {
-                              onInspectCard(card);
-                            }
-                          }}
-                        />
-                      </div>
-
-                      {/* Bottom Pocket Action Buttons */}
-                      {isOwned ? (
-                        <div className="w-full mt-2.5 grid grid-cols-2 gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => onToggleDeckCard(card.id)}
-                            className={`min-h-[32px] px-2 py-1 rounded-xl text-[11px] font-display font-bold transition-colors cursor-pointer truncate ${
-                              isInDeck
-                                ? 'bg-emerald-500/25 border border-emerald-400/50 text-emerald-300'
-                                : 'bg-white/10 hover:bg-white/20 text-white border border-white/10'
-                            }`}
-                          >
-                            {isInDeck ? '✓ Di Unit' : '+ Unit'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => onInspectCard(card)}
-                            className="min-h-[32px] px-2 py-1 rounded-xl bg-amber-400/15 hover:bg-amber-400/25 border border-amber-400/35 text-[11px] font-display font-bold text-amber-300 cursor-pointer truncate"
-                          >
-                            💎 Detail
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="w-full mt-2.5 py-1.5 rounded-xl bg-white/[0.03] border border-white/5 text-center text-[11px] font-sans text-slate-400">
-                          {card.group} · {RARITY_LABELS[card.rarity]}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </section>
-        )}
-
-        {/* SUB-SECTION 2: 5V5 STAGE UNIT FORMATION */}
-        {subSection === 'formation' && (
-          <section
-            data-testid="binder-section-formation"
-            className="rounded-3xl bg-[#0D1224]/92 border border-white/15 p-5 sm:p-6 shadow-2xl flex flex-col gap-4"
-          >
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/12 pb-3.5">
-              <div>
-                <div className="text-xs font-sans font-bold uppercase tracking-wider text-sky-400">
-                  Formasi Konser Utama · 5 Slot Aktif
+                    );
+                  })}
                 </div>
-                <h2 className="text-xl sm:text-2xl font-display font-extrabold text-white mt-0.5">
-                  5v5 Stage Unit ({saveState.deck.length}/5 Member)
-                </h2>
-                <p className="text-xs font-sans text-slate-300 mt-0.5">
-                  Klik photocard untuk melatih Level, memilih Bingkai Polco Deco, Center Bias, atau sertifikasi PSA 10 Black Label.
-                </p>
-              </div>
 
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="px-4 py-2 rounded-2xl bg-black/55 border border-amber-400/35 text-right">
-                  <div className="text-[11px] font-sans font-semibold text-slate-400">
-                    Total Stage Power Unit
-                  </div>
-                  <div className="text-xl sm:text-2xl font-mono font-extrabold text-amber-300 tabular-nums">
-                    ⚡ {totalPower.toLocaleString()}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* 5-Column Full-Width Stage Unit Cards */}
-            <div className="w-full grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 justify-items-center py-2">
-              {Array.from({ length: 5 }).map((_, slotIdx) => {
-                const cardId = saveState.deck[slotIdx];
-                const card = cardId !== undefined ? ALL_CARDS[cardId] : null;
-                if (!card) {
-                  return (
+                {/* Infinite Scroll Sentinel + Manual Load-More Fallback Button */}
+                {visibleCount < filteredCards.length && (
+                  <div
+                    ref={loadMoreSentinelRef}
+                    className="w-full py-4 flex flex-col items-center justify-center gap-2"
+                  >
                     <button
-                      key={`empty-${slotIdx}`}
                       type="button"
-                      onClick={() => setSubSection('binder')}
-                      className="w-36 h-52 sm:w-52 sm:h-[304px] rounded-[20px] border-2 border-dashed border-white/20 hover:border-sky-400/50 bg-white/5 flex flex-col items-center justify-center p-4 text-center transition-colors cursor-pointer"
+                      data-testid="binder-load-more-btn"
+                      onClick={() =>
+                        setVisibleCount((prev) =>
+                          Math.min(filteredCards.length, prev + BINDER_BATCH_SIZE)
+                        )
+                      }
+                      className="min-h-[42px] px-5 py-2 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/15 text-xs font-display font-bold text-sky-300 flex items-center gap-2 transition-colors cursor-pointer"
                     >
-                      <span className="text-3xl mb-1 text-slate-400">+</span>
-                      <span className="text-sm font-display font-bold text-white">
-                        Slot Unit #{slotIdx + 1}
-                      </span>
-                      <span className="text-xs font-sans text-sky-300 mt-1">
-                        Pilih dari Koleksi Binder
+                      <ChevronDown className="w-4 h-4" />
+                      <span>
+                        Muat 25 Kartu Berikutnya ({visibleCount}/{filteredCards.length})
                       </span>
                     </button>
-                  );
-                }
-
-                const lv = saveState.lv[card.id] || 1;
-                const st = saveState.stars[card.id] || 0;
-                const grade = saveState.cardGrades?.[card.id] || 0;
-                const cStats = getCardStats(card, lv, st, synergy.totalBonus, grade);
-                const roleMeta = ROLES[card.role] || ROLES[0];
-
-                return (
-                  <div
-                    key={card.id}
-                    className="w-full flex flex-col items-center gap-2.5 p-2.5 rounded-2xl bg-[#141B35]/85 border border-white/12"
-                  >
-                    <div className="w-full flex items-center justify-between text-xs font-sans font-bold text-slate-200 px-1">
-                      <span className="truncate">
-                        {roleMeta.icon} {roleMeta.short}
-                      </span>
-                      <span className="font-mono text-amber-300 tabular-nums">
-                        ⚡ {cStats.power}
-                      </span>
-                    </div>
-                    <Photocard3D
-                      card={card}
-                      level={lv}
-                      awakeningStars={st}
-                      synergyBonus={synergy.totalBonus}
-                      size="md"
-                      inDeck
-                      isSelected
-                      isBias={saveState.biasCardId === card.id}
-                      decoFrame={saveState.cardDeco?.[card.id]}
-                      gradeTier={grade}
-                      onClick={() => onInspectCard(card)}
-                    />
-                    <div className="w-full grid grid-cols-2 gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => onInspectCard(card)}
-                        className="min-h-[32px] px-2.5 py-1 rounded-xl bg-sky-500/20 hover:bg-sky-500/30 border border-sky-400/35 text-xs font-display font-bold text-sky-200 cursor-pointer"
-                      >
-                        Upgrade
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onToggleDeckCard(card.id)}
-                        className="min-h-[32px] px-2.5 py-1 rounded-xl bg-rose-500/20 hover:bg-rose-500/35 border border-rose-400/30 text-xs font-display font-bold text-rose-300 cursor-pointer"
-                      >
-                        Lepas
-                      </button>
-                    </div>
                   </div>
-                );
-              })}
-            </div>
-
-            {/* Active Synergy & Center Bias Bond Strip */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 pt-2 border-t border-white/12">
-              <div className="rounded-2xl bg-black/45 border border-white/10 p-3.5 flex flex-wrap items-center gap-2">
-                <span className="text-xs font-display font-bold text-slate-300">
-                  Sinergi Unit Aktif:
-                </span>
-                {synergy.activeBadges.length === 0 ? (
-                  <span className="text-xs font-sans text-slate-400">
-                    Pasang minimal 2 member dari grup yang sama atau 3+ role berbeda untuk bonus stat!
-                  </span>
-                ) : (
-                  synergy.activeBadges.map((s) => (
-                    <span
-                      key={s.label}
-                      className="px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-400/30 text-xs font-sans font-bold text-emerald-300"
-                    >
-                      ✨ {s.label} (+{s.bonusPct}% Stat)
-                    </span>
-                  ))
                 )}
-              </div>
-
-              {biasCard && (
-                <div className="rounded-2xl bg-pink-500/10 border border-pink-400/30 p-3.5 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2.5 text-xs font-sans text-pink-200 font-bold">
-                    <Heart className="w-4 h-4 text-pink-400 fill-pink-400 shrink-0" />
-                    <div>
-                      <div>
-                        Center Bias: <span className="text-white">{biasCard.name}</span> (
-                        {biasCard.group})
-                      </div>
-                      <div className="text-[11px] font-mono text-pink-300">
-                        Bond Lv.{biasBond.level} (+{Math.round(biasBond.statBonus * 100)}% All-Stat)
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => onInspectCard(biasCard)}
-                    className="px-3.5 py-2 rounded-xl bg-pink-500/25 hover:bg-pink-500/35 border border-pink-300/40 text-xs font-display font-bold text-white cursor-pointer"
-                  >
-                    Kelola Bias
-                  </button>
-                </div>
-              )}
-            </div>
+              </>
+            )}
           </section>
         )}
 
@@ -736,7 +931,7 @@ export const BinderDeckView: React.FC<BinderDeckViewProps> = ({
         {subSection === 'agency' && (
           <section
             data-testid="binder-section-agency"
-            className="rounded-3xl bg-[#0D1224]/92 border border-white/15 p-5 sm:p-6 shadow-2xl flex flex-col gap-4"
+            className="rounded-3xl bg-[#0D1326]/95 border border-white/15 p-5 sm:p-6 shadow-2xl flex flex-col gap-4"
           >
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/12 pb-3.5">
               <div>

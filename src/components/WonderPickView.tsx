@@ -287,7 +287,11 @@ export const WonderPickView: React.FC<WonderPickViewProps> = ({
                   key={board.id}
                   data-testid={`wonder-board-${bIdx}`}
                   className={`rounded-3xl liquid-glass p-3.5 sm:p-5 space-y-3 ${
-                    board.isMythicTable ? 'border border-[#FF4FA3]/60' : ''
+                    board.isExoticTable
+                      ? 'border-2 border-cyan-400/80 shadow-[0_0_32px_rgba(56,189,248,0.3)] bg-gradient-to-r from-[#0C1A30] via-[#1A0E2E] to-[#1F1706]'
+                      : board.isMythicTable
+                      ? 'border border-[#FF4FA3]/60'
+                      : ''
                   }`}
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -301,14 +305,21 @@ export const WonderPickView: React.FC<WonderPickViewProps> = ({
                         </span>
                         <span aria-hidden="true">·</span>
                         <span>{board.subtitle}</span>
-                        {board.isMythicTable && (
+                        {board.isExoticTable ? (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span className="bg-gradient-to-r from-cyan-300 via-pink-400 to-amber-300 bg-clip-text text-transparent font-black animate-pulse">
+                              🌈 JACKPOT COSMIC EXOTIC
+                            </span>
+                          </>
+                        ) : board.isMythicTable ? (
                           <>
                             <span aria-hidden="true">·</span>
                             <span className="text-[#FF4FA3] font-bold">
                               JACKPOT MYTHIC EX
                             </span>
                           </>
-                        )}
+                        ) : null}
                       </div>
                       <h3 className="text-base sm:text-lg font-display font-semibold text-white">
                         {board.title}
@@ -341,6 +352,8 @@ export const WonderPickView: React.FC<WonderPickViewProps> = ({
                       <div key={`${board.id}-${card.id}-${cIdx}`} className="flex justify-center">
                         <Photocard3D
                           card={card}
+                          effectiveRarity={board.boardRarities?.[cIdx] ?? card.rarity}
+                          rarityMask={saveState.cardRarityMask?.[card.id]}
                           level={saveState.lv[card.id] || 1}
                           awakeningStars={saveState.stars[card.id] || 0}
                           size="xs"

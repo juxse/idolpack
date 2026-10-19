@@ -99,9 +99,10 @@ export const WorldTourView: React.FC<WorldTourViewProps> = ({
       const lv = saveState.lv[c.id] || 1;
       const st = saveState.stars[c.id] || 0;
       const grade = saveState.cardGrades?.[c.id] || 0;
-      return sum + getCardStats(c, lv, st, synergy.totalBonus, grade).power;
+      const effRarity = saveState.cardRarity?.[c.id] ?? c.rarity;
+      return sum + getCardStats(c, lv, st, synergy.totalBonus, grade, effRarity).power;
     }, 0);
-  }, [deckCards, saveState.lv, saveState.stars, saveState.cardGrades, synergy.totalBonus]);
+  }, [deckCards, saveState.lv, saveState.stars, saveState.cardGrades, saveState.cardRarity, synergy.totalBonus]);
 
   const totalStarsEarned = useMemo(
     () => Object.values(saveState.stageStars).reduce((a, b) => a + b, 0),
